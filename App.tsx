@@ -2,7 +2,7 @@
 import useEmblaCarousel from 'embla-carousel-react';
 import Autoplay from 'embla-carousel-autoplay';
 import { HashRouter, Routes, Route, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
-import { Search, Home, PlayCircle, Play, User, LogOut, Menu, X, Heart, Star, Plus, Info, Sparkles, LogIn, Lock, AlertCircle, ChevronRight, ChevronLeft, Calendar, Clock, Monitor, Mic, SkipForward, SkipBack, Lightbulb, Tv, Settings, MessageCircle, ChevronsRight, ChevronsLeft, Shuffle, Users, Edit3, Check, Globe, BookOpen } from 'lucide-react';
+import { Search, Home, PlayCircle, Play, Pause, User, LogOut, Menu, X, Heart, Star, Plus, Info, Sparkles, LogIn, Lock, AlertCircle, ChevronRight, ChevronLeft, Calendar, Clock, Monitor, Mic, SkipForward, SkipBack, Lightbulb, Tv, Settings, MessageCircle, ChevronsRight, ChevronsLeft, Shuffle, Users, Edit3, Check, Globe, BookOpen } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import * as jikanService from './services/jikanService';
 import * as geminiService from './services/geminiService';
@@ -676,6 +676,7 @@ const VideoPlayer = ({ src, poster, headers, isEmbed = false, startAt = 0, onPro
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState<string>('');
+  const [isPlaying, setIsPlaying] = useState(false);
   const hlsRef = useRef<any>(null);
 
   useEffect(() => {
@@ -756,6 +757,20 @@ const VideoPlayer = ({ src, poster, headers, isEmbed = false, startAt = 0, onPro
 
   return (
     <div className="w-full h-full bg-black relative group">
+      {/* Quick play/pause button for small screens when native controls hide it */}
+      <button
+        type="button"
+        onClick={() => {
+          const v = videoRef.current;
+          if (!v) return;
+          if (v.paused) { v.play(); } else { v.pause(); }
+        }}
+        className="absolute top-2 left-2 z-20 bg-black/70 text-white rounded-full p-2 shadow-lg shadow-black/40 md:hidden"
+        aria-label={isPlaying ? 'Pause' : 'Play'}
+      >
+        {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+      </button>
+
       {!isReady && !error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-black">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-brand-500 mb-3"></div>
@@ -775,6 +790,8 @@ const VideoPlayer = ({ src, poster, headers, isEmbed = false, startAt = 0, onPro
         poster={poster}
         playsInline
         preload="metadata"
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
         onCanPlay={() => {
           if (startAt > 0 && videoRef.current) {
             videoRef.current.currentTime = startAt;
