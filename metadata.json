@@ -1,0 +1,5 @@
+{
+  "name": "AniWeb Stream",
+  "description": "A next-generation anime discovery and tracking platform powered by Jikan API and Gemini AI. Features mobile-optimized streaming UI, simulated Google login, watchlist management, and AI-driven personalized recommendations.",
+  "requestFramePermissions": []
+}

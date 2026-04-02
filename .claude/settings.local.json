@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)",
+      "Read(//c/Users/CABAHIT/Desktop/Website Projects/Yorumi-main/Yorumi-main/backend/**)",
+      "Bash(node index.js)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill /PID 24860 /F)",
+      "Bash(curl -s \"http://localhost:3001/api/anilist/manga/30013\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('keys:', list\\(d.keys\\(\\)\\)[:15]\\); print\\('scraperId:', d.get\\('scraperId'\\)\\); print\\('title:', d.get\\('title'\\)\\)\")",
+      "Bash(curl -s \"http://localhost:3001/api/manga/details/30013\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d, indent=2\\)[:500]\\)\")"
+    ]
+  }
+}
