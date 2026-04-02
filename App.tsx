@@ -679,6 +679,12 @@ const VideoPlayer = ({ src, poster, headers, isEmbed = false, startAt = 0, onPro
   const [isPlaying, setIsPlaying] = useState(false);
   const hlsRef = useRef<any>(null);
 
+  const togglePlay = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) { v.play(); } else { v.pause(); }
+  };
+
   useEffect(() => {
     if (isEmbed) return;
     const video = videoRef.current;
@@ -760,12 +766,8 @@ const VideoPlayer = ({ src, poster, headers, isEmbed = false, startAt = 0, onPro
       {/* Quick play/pause button for small screens when native controls hide it */}
       <button
         type="button"
-        onClick={() => {
-          const v = videoRef.current;
-          if (!v) return;
-          if (v.paused) { v.play(); } else { v.pause(); }
-        }}
-        className="absolute top-2 left-2 z-20 bg-black/70 text-white rounded-full p-2 shadow-lg shadow-black/40 md:hidden"
+        onClick={togglePlay}
+        className="absolute bottom-3 left-3 z-20 bg-black/75 text-white rounded-full p-2 shadow-lg shadow-black/50 md:hidden"
         aria-label={isPlaying ? 'Pause' : 'Play'}
       >
         {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
@@ -802,6 +804,18 @@ const VideoPlayer = ({ src, poster, headers, isEmbed = false, startAt = 0, onPro
           if (v && onProgress && v.duration > 0) onProgress(v.currentTime, v.duration);
         }}
       />
+
+      {/* Mobile helper controls (outside native UI) */}
+      <div className="md:hidden absolute -bottom-10 left-3 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={togglePlay}
+          className="flex items-center gap-2 bg-black/80 text-white px-3 py-1.5 rounded-full text-sm shadow-lg shadow-black/40"
+        >
+          {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+          <span>{isPlaying ? 'Pause' : 'Play'}</span>
+        </button>
+      </div>
     </div>
   );
 }
