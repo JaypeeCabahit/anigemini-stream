@@ -1470,8 +1470,10 @@ const WatchPage = () => {
 
 const SearchPage = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const query = new URLSearchParams(location.search).get('q');
   const filter = new URLSearchParams(location.search).get('filter');
+  const [searchTerm, setSearchTerm] = useState(query ?? '');
   const [results, setResults] = useState<Anime[]>([]);
   const [pagination, setPagination] = useState<jikanService.PaginationData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -1480,6 +1482,7 @@ const SearchPage = () => {
   // Reset page when query/filter changes
   useEffect(() => {
     setCurrentPage(1);
+    setSearchTerm(query ?? '');
   }, [query, filter]);
 
   useEffect(() => {
@@ -1515,11 +1518,36 @@ const SearchPage = () => {
     return 'Browse Anime';
   };
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = searchTerm.trim();
+    navigate(trimmed ? `/search?q=${encodeURIComponent(trimmed)}` : '/search');
+  };
+
   return (
     <div className="min-h-screen pt-8 pb-24 md:pb-20 w-full max-w-[2500px] mx-auto px-4 bg-[#202125]">
-      <h1 className="text-2xl font-bold mb-6 text-brand-100">
-        {getTitle()}
-      </h1>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+        <h1 className="text-2xl font-bold text-brand-100">
+          {getTitle()}
+        </h1>
+        <form onSubmit={handleSubmit} className="w-full md:w-auto">
+          <div className="relative max-w-lg w-full">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+            <input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search anime..."
+              className="w-full bg-[#151619] text-gray-200 pl-9 pr-28 py-2.5 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/60 border border-white/5"
+            />
+            <button
+              type="submit"
+              className="absolute right-1 top-1/2 -translate-y-1/2 bg-brand-600 hover:bg-brand-500 text-white px-3 py-1.5 rounded-md text-xs font-semibold transition"
+            >
+              Search
+            </button>
+          </div>
+        </form>
+      </div>
       {loading ? (
         <div className="flex justify-center pt-20">
           <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-brand-500" />
