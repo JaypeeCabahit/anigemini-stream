@@ -372,7 +372,7 @@ const NavBar = () => {
               </button>
 
               {/* Mobile Search */}
-              <button onClick={() => navigate(isMangaMode ? '/manga/search' : '/search')} className="md:hidden text-gray-300 p-2">
+              <button type="button" onClick={() => navigate(isMangaMode ? '/manga/search' : '/search')} className="md:hidden text-gray-300 p-2">
                 <Search className="w-6 h-6" />
               </button>
 
@@ -2669,26 +2669,33 @@ const LandingPage = () => {
 
 const BottomNav = () => {
   const { isAuthenticated, login } = useAuth();
+  const navigate = useNavigate();
+
+  const go = (path: string) => {
+    navigate(path);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 bg-[#202125]/95 backdrop-blur-lg border-t border-white/5 z-40 pb-safe">
+    <div className="md:hidden fixed bottom-0 left-0 right-0 bg-[#202125]/95 backdrop-blur-lg border-t border-white/5 z-[80] pb-safe pointer-events-auto">
       <div className="flex justify-around items-center h-16">
-        <Link to="/home" className="flex flex-col items-center gap-1 text-gray-400 hover:text-brand-500 active:text-brand-500">
+        <button onClick={() => go('/home')} className="flex flex-col items-center gap-1 text-gray-400 hover:text-brand-500 active:text-brand-500">
           <Home className="w-5 h-5" />
           <span className="text-[10px] font-medium">Home</span>
-        </Link>
-        <Link to="/search" className="flex flex-col items-center gap-1 text-gray-400 hover:text-brand-500">
+        </button>
+        <button onClick={() => go('/search')} className="flex flex-col items-center gap-1 text-gray-400 hover:text-brand-500">
           <Search className="w-5 h-5" />
           <span className="text-[10px] font-medium">Search</span>
-        </Link>
-        <Link to="/community" className="flex flex-col items-center gap-1 text-gray-400 hover:text-brand-500">
+        </button>
+        <button onClick={() => go('/community')} className="flex flex-col items-center gap-1 text-gray-400 hover:text-brand-500">
           <Users className="w-5 h-5" />
           <span className="text-[10px] font-medium">Community</span>
-        </Link>
+        </button>
         {isAuthenticated ? (
-          <Link to="/profile" className="flex flex-col items-center gap-1 text-gray-400 hover:text-brand-500">
+          <button onClick={() => go('/profile')} className="flex flex-col items-center gap-1 text-gray-400 hover:text-brand-500">
             <User className="w-5 h-5" />
             <span className="text-[10px] font-medium">Profile</span>
-          </Link>
+          </button>
         ) : (
           <button onClick={() => login()} className="flex flex-col items-center gap-1 text-gray-400 hover:text-brand-500">
             <LogIn className="w-5 h-5" />
