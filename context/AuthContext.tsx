@@ -195,21 +195,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   // ─── Online presence tracking ────────────────────────────────────────────────
   useEffect(() => {
-    // Generate or retrieve a guest session ID
-    let guestId = sessionStorage.getItem('guestPresenceId');
-    if (!guestId) {
-      guestId = `guest_${Math.random().toString(36).slice(2, 10)}`;
-      sessionStorage.setItem('guestPresenceId', guestId);
+    // Skip presence tracking for guests to avoid permission errors on locked-down DB rules
+    if (!user) {
+      setOnlineUsers({ members: 0, guests: 0 });
+      return;
     }
 
-    const presenceId = user ? `member_${user.uid}` : guestId;
+    const presenceId = `member_${user.uid}`;
     const presenceRef = ref(db, `presence/${presenceId}`);
 
     // Track connection and register disconnect handler
     const connectedRef = ref(db, '.info/connected');
     const unsubConnected = onValue(connectedRef, snap => {
       if (snap.val() === true) {
-        set(presenceRef, { isGuest: !user, updatedAt: Date.now() }).catch(() => {});
+        set(presenceRef, { isGuest: false, updatedAt: Date.now() }).catch(() => {});
         onDisconnect(presenceRef).remove().catch(() => {});
       }
     });
