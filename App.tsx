@@ -1295,13 +1295,13 @@ const HomePage = () => {
           {/* Main content */}
           <div className="flex-1 min-w-0">
 
-            {/* Latest Release — newest aired episodes at the top */}
+            {/* Latest Episode — newest aired episodes at the top */}
             {latestEpisodes.length > 0 && (
               <section>
                 <div className="flex items-center justify-between mb-5">
                   <h2 className="text-xl md:text-2xl font-bold text-brand-100 uppercase tracking-tight flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-brand-500 animate-pulse inline-block" />
-                    Latest Release
+                    Latest Episode
                   </h2>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 gap-y-8">
