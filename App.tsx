@@ -286,7 +286,7 @@ const NavBar = () => {
                 </div>
               </Link>
               {/* ANI / MAN toggle */}
-              <div className={`hidden md:flex items-center rounded-lg bg-[#151619] overflow-hidden border transition-colors ${isMangaMode ? 'border-purple-500/30 hover:border-purple-500/50' : 'border-white/5 hover:border-white/10'}`}>
+              <div className={`flex items-center rounded-lg bg-[#151619] overflow-hidden border transition-colors ${isMangaMode ? 'border-purple-500/30 hover:border-purple-500/50' : 'border-white/5 hover:border-white/10'}`}>
                 <Link to="/home"
                   className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider transition-all duration-200 ${!isMangaMode ? 'bg-brand-500 text-white' : 'text-gray-500 hover:text-white'}`}>
                   ANI
