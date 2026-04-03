@@ -1408,8 +1408,7 @@ const AnimeDetailsPage = () => {
         jikanService.getAnimeDetails(id),
         jikanService.getAnimeCharacters(id),
         jikanService.getAnimeRecommendations(id),
-        jikanService.getAnimeRelations(id),
-      ]).then(async ([animeData, charData, recData, relsInitial]) => {
+      ]).then(async ([animeData, charData, recData]) => {
         // If AniList reports "Not yet aired" but streaming episodes exist, fix the status
         if (animeData?.status === 'Not yet aired') {
           try {
@@ -1434,11 +1433,9 @@ const AnimeDetailsPage = () => {
         }
 
         if (finalAnime) {
-          let rels = relsInitial;
-          // If relations came back empty and we have a MAL id, retry with MAL
-          if ((!rels || rels.length === 0) && finalAnime.mal_id) {
-            rels = await jikanService.getAnimeRelations(String(finalAnime.mal_id));
-          }
+          const rels = finalAnime.mal_id
+            ? await jikanService.getAnimeRelations(String(finalAnime.mal_id))
+            : [];
 
           const allowed = ['Sequel', 'Prequel', 'Other', 'Side story', 'Summary', 'Parent story', 'Alternative version', 'Alternative setting', 'Alternate version'];
           const seasonList = [{ mal_id: String(finalAnime.mal_id), title: finalAnime.title, relation: 'Current' } as jikanService.AnimeRelation];

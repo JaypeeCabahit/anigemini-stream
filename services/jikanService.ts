@@ -89,8 +89,10 @@ const normalizeAnime = (raw: any): Anime => {
     }
   }
 
+  const malId = raw?.idMal;
+
   return {
-    mal_id: String(raw?.id ?? raw?.idMal ?? ''),
+    mal_id: malId ? String(malId) : '',
     title,
     images: {
       jpg: { image_url: poster, large_image_url: poster },
