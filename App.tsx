@@ -927,23 +927,38 @@ const SIDEBAR_TABS = [
 type SidebarTab = typeof SIDEBAR_TABS[number]['key'];
 
 const HomePage = () => {
+  const navigate = useNavigate();
   const [topAnime, setTopAnime] = useState<Anime[]>([]);
   const [seasonalAnime, setSeasonalAnime] = useState<Anime[]>([]);
   const [popularAnime, setPopularAnime] = useState<Anime[]>([]);
+  const [latestEpisodes, setLatestEpisodes] = useState<jikanService.AiringScheduleItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('weekly');
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [top, seasonal, popular] = await Promise.all([
+        const now = Math.floor(Date.now() / 1000);
+        const [top, seasonal, popular, recentSchedule] = await Promise.all([
           jikanService.getTopAnime(),
           jikanService.getSeasonalAnime(),
           jikanService.getPopularAnime(),
+          // Past 7 days of aired episodes
+          jikanService.getAiringSchedule(now - 7 * 86400, now),
         ]);
         setTopAnime(top.data);
         setSeasonalAnime(seasonal.data);
         setPopularAnime(popular.data);
+        // Sort newest first, deduplicate by anime id, limit to 20
+        const sorted = recentSchedule.sort((a, b) => b.airingAt - a.airingAt);
+        const seen = new Set<string>();
+        const deduped = sorted.filter(item => {
+          const key = item.media.mal_id;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        setLatestEpisodes(deduped.slice(0, 20));
       } catch (err) {
         console.error('Failed to load home page data:', err);
       } finally {
@@ -994,8 +1009,51 @@ const HomePage = () => {
           {/* Main content */}
           <div className="flex-1 min-w-0">
 
+            {/* Latest Release — newest aired episodes at the top */}
+            {latestEpisodes.length > 0 && (
+              <section>
+                <div className="flex items-center justify-between mb-5">
+                  <h2 className="text-xl md:text-2xl font-bold text-brand-100 uppercase tracking-tight flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-brand-500 animate-pulse inline-block" />
+                    Latest Release
+                  </h2>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 gap-y-8">
+                  {latestEpisodes.map(item => (
+                    <button key={item.id} onClick={() => navigate(`/anime/${item.media.mal_id}/watch`)}
+                      className="group relative block w-full text-left">
+                      <div className="relative aspect-[3/4] rounded-lg overflow-hidden bg-[#2a2c31]">
+                        {/* Badges */}
+                        <div className="absolute top-2 left-2 z-10 flex flex-col gap-1">
+                          <span className="bg-black/70 text-white text-[9px] font-black px-1.5 py-0.5 rounded">HD</span>
+                          <span className="bg-brand-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded">
+                            EP {item.episode}
+                          </span>
+                        </div>
+                        <img src={item.media.images.jpg.image_url} alt={item.media.title}
+                          className="w-full h-full object-cover object-top transition duration-500 group-hover:scale-105 group-hover:opacity-80" />
+                        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition duration-300 backdrop-blur-[2px] bg-black/20">
+                          <div className="bg-brand-500 rounded-full w-12 h-12 flex items-center justify-center shadow-xl transform scale-50 group-hover:scale-100 transition">
+                            <Play className="w-5 h-5 text-white fill-white ml-0.5" />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-2">
+                        <h3 className="text-white font-semibold text-sm line-clamp-1 group-hover:text-brand-400 transition">{item.media.title}</h3>
+                        <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500">
+                          <span>{item.media.type || 'TV'}</span>
+                          <span className="w-1 h-1 rounded-full bg-gray-600" />
+                          <span className="text-brand-400 font-medium">EP {item.episode}</span>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+
             {/* Trending Now */}
-            <section>
+            <section className={latestEpisodes.length > 0 ? 'mt-14' : ''}>
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl md:text-2xl font-bold text-brand-100 uppercase tracking-tight">Trending Now</h2>
                 <Link to="/search?filter=trending" className="text-xs text-gray-400 hover:text-white flex items-center gap-1">View All <ChevronRight className="w-3 h-3" /></Link>
@@ -1005,11 +1063,11 @@ const HomePage = () => {
               </div>
             </section>
 
-            {/* Latest — currently airing seasonal */}
+            {/* Popular */}
             {topAnime.length > 0 && (
               <section className="mt-14">
                 <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-xl md:text-2xl font-bold text-brand-100 uppercase tracking-tight">Latest</h2>
+                  <h2 className="text-xl md:text-2xl font-bold text-brand-100 uppercase tracking-tight">Popular</h2>
                   <Link to="/search?filter=popular" className="text-xs text-gray-400 hover:text-white flex items-center gap-1">View All <ChevronRight className="w-3 h-3" /></Link>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 gap-y-8">
@@ -1079,7 +1137,20 @@ const AnimeDetailsPage = () => {
         jikanService.getAnimeDetails(id),
         jikanService.getAnimeCharacters(id),
         jikanService.getAnimeRecommendations(id)
-      ]).then(([animeData, charData, recData]) => {
+      ]).then(async ([animeData, charData, recData]) => {
+        // If AniList reports "Not yet aired" but streaming episodes exist, fix the status
+        if (animeData?.status === 'Not yet aired') {
+          try {
+            const fast = await jikanService.getAnimeFast(id);
+            if (fast && fast.episodes.length > 0) {
+              animeData = {
+                ...animeData,
+                status: 'Currently Airing',
+                episodes: animeData.episodes || fast.episodes.length,
+              };
+            }
+          } catch { /* ignore — keep original status */ }
+        }
         setAnime(animeData);
         setCharacters(charData);
         setRecommendations(recData);

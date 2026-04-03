@@ -205,48 +205,50 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   // ─── Online presence tracking ────────────────────────────────────────────────
+  // Writes to users/${uid}/online (user's own node) to avoid /presence permission_denied.
   useEffect(() => {
-    let presenceRef: any = null;
     let unsubConnected: (() => void) | null = null;
+    let heartbeatInterval: any = null;
+
+    const markOnline = () => {
+      if (!user) return;
+      set(ref(db, `users/${user.uid}/online`), { at: Date.now() }).catch(() => {});
+    };
 
     if (user) {
-      // Authenticated: register as a named member presence
-      const presenceId = `member_${user.uid}`;
-      presenceRef = ref(db, `presence/${presenceId}`);
-
       const connectedRef = ref(db, '.info/connected');
       unsubConnected = onValue(connectedRef, snap => {
         if (snap.val() === true) {
-          set(presenceRef, { isGuest: false, updatedAt: Date.now() }).catch(() => {});
-          onDisconnect(presenceRef).remove().catch(() => {});
+          markOnline();
+          onDisconnect(ref(db, `users/${user.uid}/online`)).remove().catch(() => {});
         }
       });
+      // Heartbeat every 2 min so presence stays fresh
+      heartbeatInterval = setInterval(markOnline, 2 * 60 * 1000);
     }
 
-    // Always listen to presence list so even guests see who's online
-    const presenceListRef = ref(db, 'presence');
-    const unsubPresence = onValue(presenceListRef, snap => {
+    // Read all users to compute online set (active within last 5 min)
+    const usersListRef = ref(db, 'users');
+    const unsubUsers = onValue(usersListRef, snap => {
       if (!snap.exists()) { setOnlineUsers({ members: 0, guests: 0 }); setOnlineUserIds([]); return; }
-      let members = 0; let guests = 0;
+      const cutoff = Date.now() - 5 * 60 * 1000;
+      let members = 0;
       const ids: string[] = [];
-      Object.entries(snap.val() as Record<string, any>).forEach(([key, entry]: [string, any]) => {
-        if (entry.isGuest) {
-          guests++;
-        } else {
+      Object.entries(snap.val() as Record<string, any>).forEach(([uid, data]: [string, any]) => {
+        if (data?.online?.at && data.online.at > cutoff) {
           members++;
-          // presenceId format: "member_<uid>"
-          const uid = key.startsWith('member_') ? key.slice(7) : null;
-          if (uid) ids.push(uid);
+          ids.push(uid);
         }
       });
-      setOnlineUsers({ members, guests });
+      setOnlineUsers({ members, guests: 0 });
       setOnlineUserIds(ids);
     });
 
     return () => {
       if (unsubConnected) unsubConnected();
-      unsubPresence();
-      if (presenceRef) remove(presenceRef).catch(() => {});
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
+      unsubUsers();
+      if (user) remove(ref(db, `users/${user.uid}/online`)).catch(() => {});
     };
   }, [user]);
 
