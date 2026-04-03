@@ -371,15 +371,12 @@ const NavBar = () => {
                 <Shuffle className={`w-4 h-4 transition-transform ${isLoadingRandom ? 'animate-spin' : 'hover:rotate-180'}`} />
               </button>
 
-              {/* Mobile Search */}
-              <button type="button" onClick={() => navigate(isMangaMode ? '/manga/search' : '/search')} className="md:hidden text-gray-300 p-2">
-                <Search className="w-6 h-6" />
-              </button>
+
 
               {/* Profile / Login */}
               {isAuthenticated ? (
                 <Link to="/profile" className="flex items-center gap-3 hover:bg-white/5 p-1.5 rounded-full transition">
-                  <img src={user?.photoURL ?? ''} alt="avatar"
+                  <img src={userProfile.customPhotoURL || user?.photoURL || ''} alt="avatar"
                     className="w-10 h-10 rounded-full border-2 border-brand-500 object-cover shadow-lg" />
                   <div className="hidden lg:flex flex-col items-start mr-1">
                     <span className="text-sm font-bold text-white leading-none">{user?.displayName}</span>
@@ -1811,9 +1808,10 @@ const ProfilePage = () => {
           <div className="relative flex-shrink-0">
             <div className="group cursor-pointer" onClick={() => { setShowPhotoInput(v => !v); setPhotoUrlInput(''); }}>
               <img
-                src={userProfile.customPhotoURL ?? user.photoURL ?? ''}
+                src={userProfile.customPhotoURL || user.photoURL || ''}
                 alt="avatar"
                 className="w-24 h-24 rounded-full border-4 border-[#202125] object-cover shadow-2xl"
+                onError={e => { if (user.photoURL) (e.target as HTMLImageElement).src = user.photoURL; }}
               />
               <div className="absolute inset-0 rounded-full bg-black/60 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
                 <span className="text-white text-[10px] font-bold text-center leading-tight px-1">Change<br/>Photo</span>
