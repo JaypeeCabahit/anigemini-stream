@@ -21,7 +21,8 @@ import {
   onDisconnect,
   remove,
 } from 'firebase/database';
-import { auth, db, googleProvider } from '../services/firebase';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { auth, db, storage, googleProvider } from '../services/firebase';
 import { Anime } from '../types';
 
 export interface WatchHistoryEntry {
@@ -344,8 +345,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const uploadProfilePhoto = async (file: File): Promise<string> => {
     if (!user) throw new Error('Not authenticated');
-    const { getStorage, ref: storageRef, uploadBytes, getDownloadURL } = await import('firebase/storage');
-    const storage = getStorage();
     const photoRef = storageRef(storage, `profile-photos/${user.uid}`);
     await uploadBytes(photoRef, file);
     const url = await getDownloadURL(photoRef);
