@@ -1434,12 +1434,16 @@ const AnimeDetailsPage = () => {
         }
 
         if (finalAnime) {
+          const allowed = ['Sequel', 'Prequel', 'Other', 'Side story', 'Summary', 'Parent story', 'Alternative version', 'Alternative setting', 'Alternate version'];
           const seasonList = [{ mal_id: String(finalAnime.mal_id), title: finalAnime.title, relation: 'Current' } as jikanService.AnimeRelation];
           rels
-            .filter(r => r.relation === 'Sequel' || r.relation === 'Prequel')
+            .filter(r => allowed.includes(r.relation))
             .forEach(r => {
               if (!seasonList.find(s => s.mal_id === r.mal_id)) seasonList.push(r);
             });
+          // Sort with current first, then prequels, then others alphabetically
+          const weight: Record<string, number> = { Current: 0, Prequel: 1, Sequel: 2, 'Side story': 3, Other: 4 };
+          seasonList.sort((a, b) => (weight[a.relation] ?? 9) - (weight[b.relation] ?? 9) || a.title.localeCompare(b.title));
           setSeasonOptions(seasonList);
           setAnime(finalAnime);
         } else {
@@ -2385,7 +2389,7 @@ const ProfilePage = () => {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 mb-6 bg-[#1a1b1f] p-1 rounded-xl flex-wrap border border-white/5">
+        <div className="flex gap-1 mb-6 bg-[#1a1b1f] p-1 rounded-xl flex-wrap border border-white/5 max-w-4xl mx-auto">
           {([
             { key: 'overview', label: 'Overview' },
             { key: 'history', label: 'History' },
