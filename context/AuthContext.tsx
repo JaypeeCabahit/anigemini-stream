@@ -74,6 +74,7 @@ interface AuthState {
   logout: () => Promise<void>;
   addToWatchlist: (anime: Anime) => Promise<void>;
   removeFromWatchlist: (id: string) => Promise<void>;
+  updateWatchStatus: (animeId: string, status: string | null) => Promise<void>;
   saveWatchHistory: (entry: WatchHistoryEntry) => Promise<void>;
   saveProgress: (animeId: string, episodeId: string, currentTime: number, duration: number, episodeNumber?: number) => Promise<void>;
   getProgress: (animeId: string, episodeId: string, episodeNumber?: number) => number;
@@ -291,6 +292,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     await set(ref(db, `users/${user.uid}/watchlist/${id}`), null);
   };
 
+  const updateWatchStatus = async (animeId: string, status: string | null) => {
+    if (!user) return;
+    await update(ref(db, `users/${user.uid}/watchlist/${animeId}`), { watchStatus: status });
+  };
+
   const saveWatchHistory = async (entry: WatchHistoryEntry) => {
     if (!user) return;
     try {
@@ -411,6 +417,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       logout,
       addToWatchlist,
       removeFromWatchlist,
+      updateWatchStatus,
       saveWatchHistory,
       saveProgress,
       getProgress,
