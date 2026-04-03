@@ -2014,7 +2014,8 @@ const ProfilePage = () => {
   const [adminSearching, setAdminSearching] = useState(false);
   // MAL import
   const [malFile, setMalFile] = useState<File | null>(null);
-  const [malImportMode, setMalImportMode] = useState<'oauth' | 'xml'>('oauth');
+  const [malUsername, setMalUsername] = useState('');
+  const [malImportMode, setMalImportMode] = useState<'oauth' | 'username' | 'xml'>('oauth');
   const [malMode, setMalMode] = useState<'merge' | 'replace'>('merge');
   const [malAccessToken, setMalAccessToken] = useState<string | null>(() => getStoredMALToken());
   const [malProfileName, setMalProfileName] = useState<string | null>(() => localStorage.getItem(MAL_PROFILE_KEY));
@@ -2175,6 +2176,44 @@ const ProfilePage = () => {
     } finally {
       setImporting(false);
       setMalConnecting(false);
+    }
+  };
+
+  const handleMALImportUsername = async () => {
+    if (!malUsername.trim()) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      // Jikan public API (no auth). User list must be public.
+      const allItems: Anime[] = [];
+      let page = 1;
+      let hasNext = true;
+      while (hasNext && page <= 10) { // safety cap ~3k entries
+        const res = await fetch(`https://api.jikan.moe/v4/users/${encodeURIComponent(malUsername.trim())}/animelist?page=${page}&limit=300`);
+        if (!res.ok) throw new Error(res.status === 404 ? `User "${malUsername}" not found or list is private.` : `MAL API error (${res.status}).`);
+        const json = await res.json();
+        const items: Anime[] = (json.data ?? []).map((entry: any) => ({
+          mal_id: String(entry.mal_id),
+          title: entry.title,
+          images: entry.images ?? { jpg: { image_url: DEFAULT_POSTER, large_image_url: DEFAULT_POSTER }, webp: { image_url: DEFAULT_POSTER, large_image_url: DEFAULT_POSTER } },
+          trailer: { youtube_id: '', url: '', embed_url: '', images: { image_url: DEFAULT_POSTER, small_image_url: DEFAULT_POSTER, medium_image_url: DEFAULT_POSTER, large_image_url: DEFAULT_POSTER, maximum_image_url: DEFAULT_POSTER } },
+          synopsis: '', score: entry.score ?? null, year: null,
+          episodes: entry.episodes ?? 0, status: '', genres: [], rating: '',
+          type: entry.type || 'TV', duration: '', rank: undefined,
+          _watchStatus: MAL_STATUS_MAP[entry.watching_status] ?? 'Plan to Watch',
+        } as any));
+        allItems.push(...items);
+        hasNext = json.pagination?.has_next_page ?? false;
+        page++;
+        if (hasNext) await new Promise(r => setTimeout(r, 400)); // respect rate limit
+      }
+      if (allItems.length === 0) throw new Error('No anime found on this MAL account.');
+      await applyImport(allItems);
+      setMalUsername('');
+    } catch (err: any) {
+      setImportResult({ success: false, error: err.message || 'Import failed' });
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -2527,10 +2566,10 @@ const ProfilePage = () => {
 
             {/* Mode toggle */}
             <div className="flex bg-[#151619] rounded-xl overflow-hidden border border-white/5 p-1 gap-1">
-              {(['oauth', 'xml'] as const).map(m => (
+              {(['oauth', 'username', 'xml'] as const).map(m => (
                 <button key={m} onClick={() => { setMalImportMode(m); setImportResult(null); }}
                   className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition ${malImportMode === m ? 'bg-brand-500 text-white shadow' : 'text-gray-400 hover:text-white'}`}>
-                  {m === 'oauth' ? '🔑 MAL Account' : '📄 XML File'}
+                  {m === 'oauth' ? '🔑 MAL Account' : m === 'username' ? '👤 Username' : '📄 XML File'}
                 </button>
               ))}
             </div>
@@ -2586,6 +2625,36 @@ const ProfilePage = () => {
                   {importing
                     ? <><div className="animate-spin rounded-full h-4 w-4 border-t-2 border-white" /> Importing...</>
                     : '📥 Import from MyAnimeList'}
+                </button>
+              </div>
+            ) : malImportMode === 'username' ? (
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">MAL Username</label>
+                  <input
+                    value={malUsername}
+                    onChange={e => { setMalUsername(e.target.value); setImportResult(null); }}
+                    placeholder="e.g. your_mal_username"
+                    className="w-full bg-[#1a1b1f] text-white px-4 py-3 rounded-xl border border-white/10 focus:outline-none focus:border-brand-500/50 transition text-sm"
+                  />
+                  <p className="text-xs text-gray-600 mt-1.5">Your MAL profile must be <span className="text-gray-400">Public</span>. Uses Jikan (public MAL mirror).</p>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">Import Mode</label>
+                  <div className="flex gap-2">
+                    {(['merge', 'replace'] as const).map(mode => (
+                      <button key={mode} onClick={() => setMalMode(mode)}
+                        className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition ${malMode === mode ? 'bg-brand-500 text-white border-brand-500' : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'}`}>
+                        {mode === 'merge' ? '🔀 Merge' : '♻️ Replace'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <button onClick={handleMALImportUsername} disabled={importing || !malUsername.trim()}
+                  className="w-full bg-brand-500 hover:bg-brand-600 text-white font-bold py-3 rounded-xl transition disabled:opacity-50 flex items-center justify-center gap-2">
+                  {importing
+                    ? <><div className="animate-spin rounded-full h-4 w-4 border-t-2 border-white" /> Importing...</>
+                    : '📥 Import by Username'}
                 </button>
               </div>
             ) : (
