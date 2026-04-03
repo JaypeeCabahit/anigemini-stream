@@ -42,6 +42,8 @@ export interface UserProfile {
   bannerIndex: number;     // 0-7 preset banners
   displayNameLower: string; // for search
   joinedAt: number;
+  listPrivacy: 'public' | 'private'; // controls public profile visibility
+  customPhotoURL: string | null;     // user-uploaded profile photo
 }
 
 export interface PublicUser {
@@ -51,6 +53,8 @@ export interface PublicUser {
   profile: UserProfile;
   watchlistCount: number;
   historyCount: number;
+  watchlistData?: Anime[];
+  historyData?: WatchHistoryEntry[];
 }
 
 // CHANGE THIS to your own Firebase UID to get admin powers
@@ -70,10 +74,13 @@ interface AuthState {
   addToWatchlist: (anime: Anime) => Promise<void>;
   removeFromWatchlist: (id: string) => Promise<void>;
   saveWatchHistory: (entry: WatchHistoryEntry) => Promise<void>;
-  saveProgress: (animeId: string, episodeId: string, currentTime: number, duration: number) => Promise<void>;
-  getProgress: (animeId: string, episodeId: string) => number;
+  saveProgress: (animeId: string, episodeId: string, currentTime: number, duration: number, episodeNumber?: number) => Promise<void>;
+  getProgress: (animeId: string, episodeId: string, episodeNumber?: number) => number;
   updateBio: (bio: string) => Promise<void>;
   updateBanner: (bannerIndex: number) => Promise<void>;
+  updateListPrivacy: (privacy: 'public' | 'private') => Promise<void>;
+  updateCustomPhoto: (photoURL: string) => Promise<void>;
+  uploadProfilePhoto: (file: File) => Promise<string>;
   assignTagToUser: (uid: string, tag: string) => Promise<void>;
   searchUsers: (query: string) => Promise<PublicUser[]>;
   getUserPublicProfile: (uid: string) => Promise<PublicUser | null>;
@@ -85,6 +92,8 @@ const DEFAULT_PROFILE: UserProfile = {
   bannerIndex: 0,
   displayNameLower: '',
   joinedAt: 0,
+  listPrivacy: 'private',
+  customPhotoURL: null,
 };
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
@@ -288,11 +297,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const saveProgress = async (animeId: string, episodeId: string, currentTime: number, duration: number) => {
+  const saveProgress = async (animeId: string, episodeId: string, currentTime: number, duration: number, episodeNumber?: number) => {
     if (!user || currentTime < 5) return;
     try {
-      const safeEpKey = episodeId.replace(/[.#$[\]]/g, '_');
-      await set(ref(db, `users/${user.uid}/progress/${animeId}/${safeEpKey}`), {
+      // Use episode number as stable key (survives scraper session changes); fall back to episodeId
+      const epKey = episodeNumber != null ? `ep${episodeNumber}` : episodeId.replace(/[.#$[\]]/g, '_');
+      await set(ref(db, `users/${user.uid}/progress/${animeId}/${epKey}`), {
         currentTime, duration,
         percent: duration > 0 ? Math.round((currentTime / duration) * 100) : 0,
         updatedAt: Date.now(),
@@ -304,9 +314,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } catch { /* silent */ }
   };
 
-  const getProgress = (animeId: string, episodeId: string): number => {
-    const safeEpKey = episodeId.replace(/[.#$[\]]/g, '_');
-    return progressMap[`${animeId}_${safeEpKey}`] ?? 0;
+  const getProgress = (animeId: string, episodeId: string, episodeNumber?: number): number => {
+    const epKey = episodeNumber != null ? `ep${episodeNumber}` : episodeId.replace(/[.#$[\]]/g, '_');
+    return progressMap[`${animeId}_${epKey}`] ?? 0;
   };
 
   const updateBio = async (bio: string) => {
@@ -317,6 +327,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const updateBanner = async (bannerIndex: number) => {
     if (!user) return;
     await update(ref(db, `users/${user.uid}/profile`), { bannerIndex });
+  };
+
+  const updateListPrivacy = async (privacy: 'public' | 'private') => {
+    if (!user) return;
+    await update(ref(db, `users/${user.uid}/profile`), { listPrivacy: privacy });
+  };
+
+  const updateCustomPhoto = async (photoURL: string) => {
+    if (!user) return;
+    await update(ref(db, `users/${user.uid}/profile`), { customPhotoURL: photoURL });
+    await update(ref(db, `users/${user.uid}`), { photoURL });
+  };
+
+  const uploadProfilePhoto = async (file: File): Promise<string> => {
+    if (!user) throw new Error('Not authenticated');
+    const { getStorage, ref: storageRef, uploadBytes, getDownloadURL } = await import('firebase/storage');
+    const storage = getStorage();
+    const photoRef = storageRef(storage, `profile-photos/${user.uid}`);
+    await uploadBytes(photoRef, file);
+    const url = await getDownloadURL(photoRef);
+    await updateCustomPhoto(url);
+    return url;
   };
 
   // Admin only: assign a custom tag to any user
@@ -383,6 +415,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       getProgress,
       updateBio,
       updateBanner,
+      updateListPrivacy,
+      updateCustomPhoto,
+      uploadProfilePhoto,
       assignTagToUser,
       searchUsers,
       getUserPublicProfile,
@@ -394,13 +429,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
 function buildPublicUser(uid: string, data: any): PublicUser | null {
   if (!data || !data.displayName) return null;
+  const profile: UserProfile = { ...DEFAULT_PROFILE, ...(data.profile ?? {}) };
+  const isPublic = profile.listPrivacy === 'public';
   return {
     uid,
     displayName: data.displayName,
-    photoURL: data.photoURL ?? null,
-    profile: data.profile ?? DEFAULT_PROFILE,
+    // Prefer custom uploaded photo, then Google photo
+    photoURL: profile.customPhotoURL ?? data.photoURL ?? null,
+    profile,
     watchlistCount: data.watchlist ? Object.keys(data.watchlist).length : 0,
     historyCount: data.watchHistory ? Object.keys(data.watchHistory).length : 0,
+    // Only expose detailed list data for public profiles
+    watchlistData: isPublic && data.watchlist
+      ? (Object.values(data.watchlist) as Anime[]).slice(0, 24)
+      : undefined,
+    historyData: isPublic && data.watchHistory
+      ? (Object.values(data.watchHistory) as WatchHistoryEntry[])
+          .sort((a, b) => b.watchedAt - a.watchedAt)
+          .slice(0, 12)
+      : undefined,
   };
 }
 

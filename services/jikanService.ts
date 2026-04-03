@@ -69,17 +69,23 @@ const normalizeAnime = (raw: any): Anime => {
 
   let mappedStatus = statusMap[raw?.status] || raw?.status || '';
 
-  // Heuristic: if AniList says "Not yet aired" but the start date is already in the past,
-  // the show is likely airing (data lag on AniList side).
-  if (mappedStatus === 'Not yet aired' && startDate?.year) {
-    const today = new Date();
-    const airDate = new Date(
-      startDate.year,
-      (startDate.month ?? 1) - 1,
-      startDate.day ?? 1
-    );
-    if (airDate <= today) {
+  // Heuristic: if AniList says "Not yet aired" but the show is actually running,
+  // correct the status using available data signals.
+  if (mappedStatus === 'Not yet aired') {
+    // If AniList has a next scheduled episode, it's definitely airing
+    if (raw?.nextAiringEpisode) {
       mappedStatus = 'Currently Airing';
+    } else if (startDate?.year) {
+      // If start date is in the past, treat as airing (AniList data lag)
+      const today = new Date();
+      const airDate = new Date(
+        startDate.year,
+        (startDate.month ?? 1) - 1,
+        startDate.day ?? 1
+      );
+      if (airDate <= today) {
+        mappedStatus = 'Currently Airing';
+      }
     }
   }
 

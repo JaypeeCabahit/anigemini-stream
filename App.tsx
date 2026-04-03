@@ -1201,7 +1201,7 @@ const AnimeDetailsPage = () => {
 
 const WatchPage = () => {
   const { id } = useParams<{ id: string }>();
-  const { saveWatchHistory, saveProgress, getProgress, addToWatchlist, removeFromWatchlist, watchlist, user, login } = useAuth();
+  const { saveWatchHistory, saveProgress, getProgress, addToWatchlist, removeFromWatchlist, watchlist, watchHistory, user, login } = useAuth();
   const [anime, setAnime] = useState<Anime | null>(null);
   const isInWatchlist = anime ? watchlist.some(a => a.mal_id === String(anime.mal_id)) : false;
   const [resumeTime, setResumeTime] = useState(0);
@@ -1252,7 +1252,12 @@ const WatchPage = () => {
         setEpisodePage(0);
 
         if (orderedEpisodes.length > 0) {
-          handleEpisodeSelect(orderedEpisodes[0], fast.anime); // pass anime directly to avoid stale state
+          // Resume from the last watched episode if available
+          const lastEntry = watchHistory.find(h => h.animeId === id);
+          const startEp = lastEntry?.episodeNumber
+            ? (orderedEpisodes.find(ep => ep.number === lastEntry.episodeNumber) ?? orderedEpisodes[0])
+            : orderedEpisodes[0];
+          handleEpisodeSelect(startEp, fast.anime);
         }
       } catch (err) {
         console.error(err);
@@ -1287,8 +1292,8 @@ const WatchPage = () => {
       }
       setStreamSource(source);
 
-      // Load saved resume time
-      const savedTime = id ? getProgress(id, episode.id) : 0;
+      // Load saved resume time (prefer episode-number key for stability)
+      const savedTime = id ? getProgress(id, episode.id, episode.number) : 0;
       setResumeTime(savedTime);
 
       // Save to watch history — use animeOverride for first load since anime state may not be set yet
@@ -1409,7 +1414,7 @@ const WatchPage = () => {
                     if (!currentEpisode || !id) return;
                     if (progressSaveTimer.current) clearTimeout(progressSaveTimer.current);
                     progressSaveTimer.current = setTimeout(() => {
-                      saveProgress(id, currentEpisode.id, currentTime, duration);
+                      saveProgress(id, currentEpisode.id, currentTime, duration, currentEpisode.number);
                     }, 5000); // save after 5s of no seeking
                   }}
                 />
@@ -1652,12 +1657,14 @@ const groupByDate = (entries: import('./context/AuthContext').WatchHistoryEntry[
 };
 
 const ProfilePage = () => {
-  const { user, watchlist, watchHistory, removeFromWatchlist, logout, userProfile, updateBio, updateBanner, assignTagToUser, isAdmin, searchUsers } = useAuth();
+  const { user, watchlist, watchHistory, removeFromWatchlist, logout, userProfile, updateBio, updateBanner, updateListPrivacy, updateCustomPhoto, uploadProfilePhoto, assignTagToUser, isAdmin, searchUsers } = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'overview' | 'history' | 'watchlist'>('overview');
   const [editingBio, setEditingBio] = useState(false);
   const [bioInput, setBioInput] = useState('');
   const [showBannerPicker, setShowBannerPicker] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement>(null);
   // Admin tag assignment
   const [adminSearch, setAdminSearch] = useState('');
   const [adminResults, setAdminResults] = useState<import('./context/AuthContext').PublicUser[]>([]);
@@ -1693,6 +1700,20 @@ const ProfilePage = () => {
     setAdminSearch('');
   };
 
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingPhoto(true);
+    try {
+      await uploadProfilePhoto(file);
+    } catch {
+      // Storage rules may deny — fall back to nothing
+    } finally {
+      setUploadingPhoto(false);
+      if (photoInputRef.current) photoInputRef.current.value = '';
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#202125] pb-24 md:pb-20">
       {/* Banner */}
@@ -1716,8 +1737,20 @@ const ProfilePage = () => {
       {/* Profile card */}
       <div className="max-w-5xl mx-auto px-4 -mt-16 relative z-10">
         <div className="flex flex-col sm:flex-row items-start sm:items-end gap-4 mb-6">
-          <img src={user.photoURL ?? ''} alt="avatar"
-            className="w-24 h-24 rounded-full border-4 border-[#202125] object-cover shadow-2xl flex-shrink-0" />
+          {/* Clickable avatar with upload overlay */}
+          <div className="relative flex-shrink-0 group cursor-pointer" onClick={() => photoInputRef.current?.click()}>
+            <img
+              src={userProfile.customPhotoURL ?? user.photoURL ?? ''}
+              alt="avatar"
+              className="w-24 h-24 rounded-full border-4 border-[#202125] object-cover shadow-2xl"
+            />
+            <div className="absolute inset-0 rounded-full bg-black/60 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+              {uploadingPhoto
+                ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                : <span className="text-white text-[10px] font-bold text-center leading-tight px-1">Change<br/>Photo</span>}
+            </div>
+            <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+          </div>
           <div className="flex-1 min-w-0 pb-1">
             <div className="flex flex-wrap items-center gap-2 mb-1">
               <h1 className="text-2xl font-black text-white">{user.displayName}</h1>
@@ -1744,10 +1777,21 @@ const ProfilePage = () => {
               </button>
             )}
           </div>
-          <button onClick={() => { logout(); navigate('/'); }}
-            className="flex items-center gap-2 text-sm text-gray-400 hover:text-red-400 transition bg-white/5 hover:bg-red-500/10 px-4 py-2 rounded-lg border border-white/5">
-            <LogOut className="w-4 h-4" /> Sign out
-          </button>
+          <div className="flex flex-col sm:flex-row gap-2">
+            {/* Profile visibility toggle */}
+            <button
+              onClick={() => updateListPrivacy(userProfile.listPrivacy === 'public' ? 'private' : 'public')}
+              className={`flex items-center gap-2 text-sm transition px-4 py-2 rounded-lg border font-medium ${userProfile.listPrivacy === 'public' ? 'bg-green-500/10 text-green-400 hover:bg-green-500/20 border-green-500/20' : 'bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 border-white/5'}`}
+              title={userProfile.listPrivacy === 'public' ? 'Lists are public — click to make private' : 'Lists are private — click to make public'}
+            >
+              <Globe className="w-4 h-4" />
+              {userProfile.listPrivacy === 'public' ? 'Public Lists' : 'Private Lists'}
+            </button>
+            <button onClick={() => { logout(); navigate('/'); }}
+              className="flex items-center gap-2 text-sm text-gray-400 hover:text-red-400 transition bg-white/5 hover:bg-red-500/10 px-4 py-2 rounded-lg border border-white/5">
+              <LogOut className="w-4 h-4" /> Sign out
+            </button>
+          </div>
         </div>
 
         {/* Stats row */}
@@ -2515,7 +2559,12 @@ const CommunityPage = () => {
     }, 350);
   };
 
-  const totalOnline = onlineUsers.members + onlineUsers.guests;
+  // Always include the current logged-in user in online counts (they're here right now)
+  const effectiveOnlineIds = user
+    ? [...new Set([...onlineUserIds, user.uid])]
+    : onlineUserIds;
+  const effectiveMembers = user ? Math.max(onlineUsers.members, 1) : onlineUsers.members;
+  const totalOnline = effectiveMembers + onlineUsers.guests;
 
   return (
     <div className="min-h-screen bg-[#202125] pb-24 md:pb-20">
@@ -2534,7 +2583,7 @@ const CommunityPage = () => {
           </div>
           <div className="w-px h-4 bg-white/10" />
           <div className="flex items-center gap-3 text-xs text-gray-500">
-            <span><span className="text-white font-semibold">{onlineUsers.members}</span> members</span>
+            <span><span className="text-white font-semibold">{effectiveMembers}</span> members</span>
             <span>·</span>
             <span><span className="text-gray-300 font-semibold">{onlineUsers.guests}</span> guests</span>
           </div>
@@ -2562,7 +2611,7 @@ const CommunityPage = () => {
             ? <p className="text-gray-500 text-sm text-center py-12">No users found.</p>
             : <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
               {results.map(u => {
-                const isOnline = onlineUserIds.includes(u.uid);
+                const isOnline = effectiveOnlineIds.includes(u.uid);
                 const isSelf = user?.uid === u.uid;
                 return (
                   <button key={u.uid} onClick={() => navigate(`/user/${u.uid}`)}
@@ -2600,10 +2649,11 @@ const CommunityPage = () => {
 
 const PublicUserProfilePage = () => {
   const { uid } = useParams<{ uid: string }>();
-  const { getUserPublicProfile } = useAuth();
+  const { getUserPublicProfile, user: currentUser } = useAuth();
+  const navigate = useNavigate();
   const [profile, setProfile] = useState<import('./context/AuthContext').PublicUser | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'history' | 'watchlist'>('overview');
+  const [activeTab, setActiveTab] = useState<'history' | 'watchlist'>('history');
 
   useEffect(() => {
     if (!uid) return;
@@ -2666,7 +2716,56 @@ const PublicUserProfilePage = () => {
           ))}
         </div>
 
-        <p className="text-gray-500 text-sm text-center py-6">This user's detailed lists are private.</p>
+        {profile.profile?.listPrivacy === 'public' && (profile.historyData || profile.watchlistData) ? (
+          <>
+            {/* Tab switcher */}
+            <div className="flex gap-1 mb-5 bg-[#1a1b1f] p-1 rounded-xl w-fit border border-white/5">
+              {(['history', 'watchlist'] as const).map(tab => (
+                <button key={tab} onClick={() => setActiveTab(tab)}
+                  className={`px-5 py-2 rounded-lg text-sm font-semibold capitalize transition ${activeTab === tab ? 'bg-brand-500 text-white shadow' : 'text-gray-400 hover:text-white'}`}>
+                  {tab === 'history' ? `History (${profile.historyCount})` : `Watchlist (${profile.watchlistCount})`}
+                </button>
+              ))}
+            </div>
+
+            {activeTab === 'history' && (
+              profile.historyData && profile.historyData.length > 0
+                ? <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                    {profile.historyData.map(e => (
+                      <button key={e.animeId} onClick={() => navigate(`/anime/${e.animeId}`)}
+                        className="group relative rounded-xl overflow-hidden bg-[#1a1b1f] border border-white/5 hover:border-brand-500/40 transition text-left">
+                        <img src={e.animeImage} alt={e.animeTitle} className="w-full aspect-[2/3] object-cover" />
+                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                          <Play className="w-8 h-8 text-white fill-white" />
+                        </div>
+                        <div className="p-2">
+                          <p className="text-xs text-white font-semibold truncate">{e.animeTitle}</p>
+                          <p className="text-[10px] text-brand-400">Ep {e.episodeNumber}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                : <p className="text-gray-500 text-sm text-center py-6">No watch history yet.</p>
+            )}
+
+            {activeTab === 'watchlist' && (
+              profile.watchlistData && profile.watchlistData.length > 0
+                ? <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
+                    {profile.watchlistData.map((anime: any) => (
+                      <button key={anime.mal_id} onClick={() => navigate(`/anime/${anime.mal_id}`)}
+                        className="group rounded-xl overflow-hidden bg-[#1a1b1f] border border-white/5 hover:border-brand-500/40 transition">
+                        <img src={anime.images?.webp?.image_url ?? anime.images?.jpg?.image_url} alt={anime.title} className="w-full aspect-[2/3] object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                : <p className="text-gray-500 text-sm text-center py-6">No anime saved yet.</p>
+            )}
+          </>
+        ) : (
+          <p className="text-gray-500 text-sm text-center py-6 flex items-center justify-center gap-2">
+            <Lock className="w-4 h-4" /> This user's lists are private.
+          </p>
+        )}
       </div>
     </div>
   );
