@@ -13,6 +13,115 @@ import { AnimeCardSkeleton, HeroSkeleton, DetailsSkeleton, EpisodeListSkeleton }
 import { LazyImage } from './components/LazyImage';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
+// --- MyAnimeList OAuth (PKCE) helpers ---
+const MAL_CLIENT_ID = import.meta.env.VITE_MAL_CLIENT_ID || '';
+const MAL_REDIRECT_URI = import.meta.env.VITE_MAL_REDIRECT_URI || window.location.origin;
+const MAL_ACCESS_KEY = 'malAccessToken';
+const MAL_REFRESH_KEY = 'malRefreshToken';
+const MAL_EXPIRES_KEY = 'malTokenExpiresAt';
+const MAL_PROFILE_KEY = 'malProfileName';
+const MAL_STATE_KEY = 'malOauthState';
+const MAL_VERIFIER_KEY = 'malCodeVerifier';
+const MAL_AUTH_ERROR_KEY = 'malAuthError';
+
+const malBase64Url = (buffer: ArrayBuffer) =>
+  btoa(String.fromCharCode(...new Uint8Array(buffer)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+
+const malRandomString = (length = 64) => malBase64Url(crypto.getRandomValues(new Uint8Array(length))).slice(0, length);
+
+const malPkceChallenge = async (verifier: string) => {
+  const data = new TextEncoder().encode(verifier);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return malBase64Url(hash);
+};
+
+const saveMALTokens = (resp: { access_token: string; refresh_token?: string; expires_in: number }) => {
+  const expiresAt = Date.now() + Math.max(0, resp.expires_in - 60) * 1000; // refresh 1 min early
+  localStorage.setItem(MAL_ACCESS_KEY, resp.access_token);
+  if (resp.refresh_token) localStorage.setItem(MAL_REFRESH_KEY, resp.refresh_token);
+  localStorage.setItem(MAL_EXPIRES_KEY, String(expiresAt));
+  window.dispatchEvent(new Event('mal-auth-changed'));
+};
+
+const clearMALTokens = () => {
+  [MAL_ACCESS_KEY, MAL_REFRESH_KEY, MAL_EXPIRES_KEY, MAL_PROFILE_KEY].forEach(k => localStorage.removeItem(k));
+  window.dispatchEvent(new Event('mal-auth-changed'));
+};
+
+const getStoredMALToken = () => {
+  const token = localStorage.getItem(MAL_ACCESS_KEY);
+  const expires = Number(localStorage.getItem(MAL_EXPIRES_KEY));
+  if (token && expires && Date.now() < expires) return token;
+  return null;
+};
+
+const beginMALAuth = async () => {
+  if (!MAL_CLIENT_ID) throw new Error('Missing MAL client id (VITE_MAL_CLIENT_ID).');
+  const verifier = malRandomString(64);
+  const state = `mal-${malRandomString(16)}`;
+  const challenge = await malPkceChallenge(verifier);
+  localStorage.setItem(MAL_VERIFIER_KEY, verifier);
+  localStorage.setItem(MAL_STATE_KEY, state);
+  const authUrl = `https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=${encodeURIComponent(MAL_CLIENT_ID)}&code_challenge=${challenge}&state=${state}&redirect_uri=${encodeURIComponent(MAL_REDIRECT_URI)}`;
+  window.location.href = authUrl;
+};
+
+const exchangeMALCode = async (code: string, verifier: string) => {
+  const params = new URLSearchParams({
+    client_id: MAL_CLIENT_ID,
+    grant_type: 'authorization_code',
+    code,
+    code_verifier: verifier,
+    redirect_uri: MAL_REDIRECT_URI,
+  });
+  const res = await fetch('https://myanimelist.net/v1/oauth2/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
+  });
+  if (!res.ok) throw new Error('MAL token exchange failed.');
+  const data = await res.json();
+  saveMALTokens(data);
+  return data as { access_token: string; refresh_token?: string; expires_in: number };
+};
+
+const refreshMALToken = async () => {
+  const refreshToken = localStorage.getItem(MAL_REFRESH_KEY);
+  if (!refreshToken || !MAL_CLIENT_ID) return null;
+  const params = new URLSearchParams({
+    client_id: MAL_CLIENT_ID,
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+    redirect_uri: MAL_REDIRECT_URI,
+  });
+  const res = await fetch('https://myanimelist.net/v1/oauth2/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
+  });
+  if (!res.ok) {
+    clearMALTokens();
+    return null;
+  }
+  const data = await res.json();
+  saveMALTokens(data);
+  return data.access_token as string;
+};
+
+const fetchMALProfile = async (accessToken: string) => {
+  const res = await fetch('https://api.myanimelist.net/v2/users/@me', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (data?.name) {
+    localStorage.setItem(MAL_PROFILE_KEY, data.name);
+    window.dispatchEvent(new Event('mal-auth-changed'));
+  }
+  return data;
+};
+
 // --- Types ---
 type ThemeMode = 'light' | 'dark';
 
@@ -31,6 +140,48 @@ const ScrollToTop = () => {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [pathname, search]);
+
+  return null;
+};
+
+// Handles MAL OAuth callback (code/state) globally once the app loads
+const MALCallbackHandler = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const code = params.get('code');
+    const state = params.get('state');
+    const expectedState = localStorage.getItem(MAL_STATE_KEY);
+    const verifier = localStorage.getItem(MAL_VERIFIER_KEY);
+
+    if (!code) return;
+
+    // Only handle if we were expecting a MAL callback
+    if (!expectedState || state !== expectedState || !verifier) {
+      localStorage.setItem(MAL_AUTH_ERROR_KEY, 'Invalid MAL callback. Please try connecting again.');
+      window.dispatchEvent(new Event('mal-auth-changed'));
+      navigate('/profile', { replace: true });
+      return;
+    }
+
+    (async () => {
+      try {
+        const tokenData = await exchangeMALCode(code, verifier);
+        await fetchMALProfile(tokenData.access_token);
+      } catch (err: any) {
+        localStorage.setItem(MAL_AUTH_ERROR_KEY, err?.message || 'Failed to connect to MyAnimeList.');
+        clearMALTokens();
+      } finally {
+        localStorage.removeItem(MAL_STATE_KEY);
+        localStorage.removeItem(MAL_VERIFIER_KEY);
+        window.dispatchEvent(new Event('mal-auth-changed'));
+        // Strip query params and go to profile import tab
+        navigate('/profile', { replace: true });
+      }
+    })();
+  }, [location.search, location.pathname, navigate]);
 
   return null;
 };
@@ -427,11 +578,11 @@ const WATCH_STATUSES = ['Watching', 'Completed', 'On-Hold', 'Plan to Watch', 'Dr
 type WatchStatus = typeof WATCH_STATUSES[number];
 
 const STATUS_META: Record<WatchStatus, { color: string; icon: string }> = {
-  'Watching':      { color: 'bg-brand-500',  icon: '▶' },
-  'Completed':     { color: 'bg-green-600',  icon: '✓' },
-  'On-Hold':       { color: 'bg-yellow-500', icon: '⏸' },
-  'Plan to Watch': { color: 'bg-blue-600',   icon: '📋' },
-  'Dropped':       { color: 'bg-red-700',    icon: '✕' },
+  'Watching': { color: 'bg-brand-500', icon: '▶' },
+  'Completed': { color: 'bg-green-600', icon: '✓' },
+  'On-Hold': { color: 'bg-yellow-500', icon: '⏸' },
+  'Plan to Watch': { color: 'bg-blue-600', icon: '📋' },
+  'Dropped': { color: 'bg-red-700', icon: '✕' },
 };
 
 interface WatchlistModalProps {
@@ -1066,12 +1217,14 @@ const HomePage = () => {
         // Sort newest first, deduplicate by anime id, limit to 20
         const sorted = recentSchedule.sort((a, b) => b.airingAt - a.airingAt);
         const seen = new Set<string>();
-        const deduped = sorted.filter(item => {
-          const key = item.media.mal_id;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
+        const deduped = sorted
+          .filter(item => item.media?.mal_id) // skip entries without MAL id (can't open details)
+          .filter(item => {
+            const key = String(item.media.mal_id);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
         setLatestEpisodes(deduped.slice(0, 20));
       } catch (err) {
         console.error('Failed to load home page data:', err);
@@ -1864,14 +2017,31 @@ const ProfilePage = () => {
   // MAL import
   const [malFile, setMalFile] = useState<File | null>(null);
   const [malUsername, setMalUsername] = useState('');
-  const [malImportMode, setMalImportMode] = useState<'username' | 'xml'>('username');
+  const [malImportMode, setMalImportMode] = useState<'oauth' | 'username' | 'xml'>('oauth');
   const [malMode, setMalMode] = useState<'merge' | 'replace'>('merge');
+  const [malAccessToken, setMalAccessToken] = useState<string | null>(() => getStoredMALToken());
+  const [malProfileName, setMalProfileName] = useState<string | null>(() => localStorage.getItem(MAL_PROFILE_KEY));
+  const [malConnecting, setMalConnecting] = useState(false);
+  const [malAuthMessage, setMalAuthMessage] = useState<string | null>(() => localStorage.getItem(MAL_AUTH_ERROR_KEY));
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ success: boolean; count?: number; total?: number; error?: string } | null>(null);
   // Watchlist filter
   const [watchStatusFilter, setWatchStatusFilter] = useState<string>('all');
   // Settings
   const { settings, updateSetting } = useSettings();
+
+  useEffect(() => {
+    const syncMAL = () => {
+      setMalAccessToken(getStoredMALToken());
+      setMalProfileName(localStorage.getItem(MAL_PROFILE_KEY));
+      const err = localStorage.getItem(MAL_AUTH_ERROR_KEY);
+      setMalAuthMessage(err);
+      if (err) localStorage.removeItem(MAL_AUTH_ERROR_KEY);
+    };
+    syncMAL();
+    window.addEventListener('mal-auth-changed', syncMAL);
+    return () => window.removeEventListener('mal-auth-changed', syncMAL);
+  }, []);
 
   if (!user) return (
     <div className="min-h-screen bg-[#202125] flex flex-col items-center justify-center gap-4 text-white">
@@ -1913,8 +2083,9 @@ const ProfilePage = () => {
     }
   };
 
-  const MAL_STATUS_MAP: Record<number, string> = {
+  const MAL_STATUS_MAP: Record<number | string, string> = {
     1: 'Watching', 2: 'Completed', 3: 'On-Hold', 4: 'Dropped', 6: 'Plan to Watch',
+    watching: 'Watching', completed: 'Completed', on_hold: 'On-Hold', dropped: 'Dropped', plan_to_watch: 'Plan to Watch',
   };
   const DEFAULT_POSTER = 'https://placehold.co/600x900?text=No+Image';
 
@@ -1926,36 +2097,119 @@ const ProfilePage = () => {
     setImportResult({ success: true, count: newEntries.length, total: toAdd.length });
   };
 
+  const handleConnectMAL = async () => {
+    setImportResult(null);
+    setMalAuthMessage(null);
+    try {
+      setMalConnecting(true);
+      await beginMALAuth();
+    } catch (err: any) {
+      setMalAuthMessage(err?.message || 'Unable to start MAL login. Check env vars.');
+      setMalConnecting(false);
+    }
+  };
+
+  const handleDisconnectMAL = () => {
+    clearMALTokens();
+    localStorage.removeItem(MAL_AUTH_ERROR_KEY);
+    setMalAccessToken(null);
+    setMalProfileName(null);
+    setMalAuthMessage('Disconnected from MyAnimeList.');
+  };
+
+  const getValidMALToken = async () => {
+    let token = getStoredMALToken();
+    if (token) return token;
+    token = await refreshMALToken();
+    if (token) {
+      await fetchMALProfile(token).catch(() => {});
+      return token;
+    }
+    return null;
+  };
+
+  const handleMALImportOAuth = async () => {
+    setImporting(true);
+    setImportResult(null);
+    try {
+      let token = await getValidMALToken();
+      if (!token) throw new Error('Connect your MyAnimeList account first.');
+
+      const statusMap = MAL_STATUS_MAP;
+      const allItems: Anime[] = [];
+      let next = 'https://api.myanimelist.net/v2/users/@me/animelist?limit=1000&fields=list_status{status,score,num_episodes_watched},media_type,num_episodes,main_picture';
+
+      while (next) {
+        const res = await fetch(next, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.status === 401) {
+          token = await refreshMALToken();
+          if (token) { await fetchMALProfile(token).catch(() => {}); continue; }
+          throw new Error('MAL session expired. Please reconnect.');
+        }
+        if (!res.ok) throw new Error(`MAL API error (${res.status}).`);
+        const json = await res.json();
+        const items: Anime[] = (json.data ?? []).map((entry: any) => {
+          const node = entry.node ?? {};
+          const ls = entry.list_status ?? {};
+          const pic = node.main_picture ?? {};
+          const image = pic.large || pic.medium || DEFAULT_POSTER;
+          return {
+            mal_id: String(node.id),
+            title: node.title,
+            images: { jpg: { image_url: image, large_image_url: image }, webp: { image_url: image, large_image_url: image } },
+            trailer: { youtube_id: '', url: '', embed_url: '', images: { image_url: image, small_image_url: image, medium_image_url: image, large_image_url: image, maximum_image_url: image } },
+            synopsis: '', score: ls.score ?? null, year: null,
+            episodes: node.num_episodes ?? 0, status: '', genres: [], rating: '',
+            type: node.media_type || 'TV', duration: '', rank: undefined,
+            _watchStatus: statusMap[ls.status as any] ?? 'Plan to Watch',
+          } as any;
+        });
+        allItems.push(...items);
+        next = json.paging?.next ?? null;
+        if (next) await new Promise(r => setTimeout(r, 250));
+      }
+
+      if (allItems.length === 0) throw new Error('No anime found on this MAL account.');
+      await applyImport(allItems);
+      setMalAccessToken(getStoredMALToken());
+      if (!malProfileName && token) await fetchMALProfile(token).catch(() => {});
+    } catch (err: any) {
+      setImportResult({ success: false, error: err.message || 'Import failed' });
+    } finally {
+      setImporting(false);
+      setMalConnecting(false);
+    }
+  };
+
   const handleMALImportUsername = async () => {
     if (!malUsername.trim()) return;
     setImporting(true);
     setImportResult(null);
     try {
-      // Jikan v4 public API — no auth needed, paginated
-      const allItems: Anime[] = [];
-      let page = 1;
-      let hasNext = true;
-      while (hasNext && page <= 10) {
-        const res = await fetch(`https://api.jikan.moe/v4/users/${encodeURIComponent(malUsername.trim())}/animelist?page=${page}&limit=300`);
-        if (!res.ok) throw new Error(res.status === 404 ? `User "${malUsername}" not found on MAL.` : `MAL API error (${res.status})`);
-        const json = await res.json();
-        const items: Anime[] = (json.data ?? []).map((entry: any) => ({
-          mal_id: String(entry.mal_id),
-          title: entry.title,
-          images: entry.images ?? { jpg: { image_url: DEFAULT_POSTER, large_image_url: DEFAULT_POSTER }, webp: { image_url: DEFAULT_POSTER, large_image_url: DEFAULT_POSTER } },
-          trailer: { youtube_id: '', url: '', embed_url: '', images: { image_url: DEFAULT_POSTER, small_image_url: DEFAULT_POSTER, medium_image_url: DEFAULT_POSTER, large_image_url: DEFAULT_POSTER, maximum_image_url: DEFAULT_POSTER } },
-          synopsis: '', score: entry.score ?? null, year: null,
-          episodes: entry.episodes ?? 0, status: '', genres: [], rating: '',
-          type: entry.type || 'TV', duration: '', rank: undefined,
-          _watchStatus: MAL_STATUS_MAP[entry.watching_status] ?? 'Plan to Watch',
-        } as any));
-        allItems.push(...items);
-        hasNext = json.pagination?.has_next_page ?? false;
-        page++;
-        if (hasNext) await new Promise(r => setTimeout(r, 400)); // respect rate limit
+      const res = await fetch(`/api/mal-list?username=${encodeURIComponent(malUsername.trim())}`);
+      if (!res.ok) {
+        const errTxt = await res.text();
+        throw new Error(errTxt ? errTxt : 'Failed to fetch list');
       }
-      if (allItems.length === 0) throw new Error('No anime found on this MAL account.');
-      await applyImport(allItems);
+      const json = await res.json();
+      const list = json.data as any[];
+      if (!Array.isArray(list) || list.length === 0) throw new Error('No anime found on this MAL account.');
+
+      const items: Anime[] = list.map((entry: any) => {
+        const image = entry.anime_image_path || DEFAULT_POSTER;
+        return {
+          mal_id: String(entry.anime_id),
+          title: entry.anime_title || entry.anime_title_eng || 'Untitled',
+          images: { jpg: { image_url: image, large_image_url: image }, webp: { image_url: image, large_image_url: image } },
+          trailer: { youtube_id: '', url: '', embed_url: '', images: { image_url: image, small_image_url: image, medium_image_url: image, large_image_url: image, maximum_image_url: image } },
+          synopsis: '', score: entry.score ?? null, year: null,
+          episodes: entry.anime_num_episodes ?? 0, status: '', genres: [], rating: '',
+          type: entry.anime_media_type_string || 'TV', duration: '', rank: undefined,
+          _watchStatus: MAL_STATUS_MAP[entry.status] ?? 'Plan to Watch',
+        } as any;
+      });
+
+      await applyImport(items);
       setMalUsername('');
     } catch (err: any) {
       setImportResult({ success: false, error: err.message || 'Import failed' });
@@ -2225,12 +2479,12 @@ const ProfilePage = () => {
         {/* Watchlist tab */}
         {activeTab === 'watchlist' && (() => {
           const STATUS_FILTERS = [
-            { key: 'all',           label: 'All',           color: '' },
-            { key: 'Watching',      label: 'Watching',      color: 'bg-green-500' },
-            { key: 'On-Hold',       label: 'On-Hold',       color: 'bg-yellow-500' },
+            { key: 'all', label: 'All', color: '' },
+            { key: 'Watching', label: 'Watching', color: 'bg-green-500' },
+            { key: 'On-Hold', label: 'On-Hold', color: 'bg-yellow-500' },
             { key: 'Plan to Watch', label: 'Plan to Watch', color: 'bg-blue-500' },
-            { key: 'Dropped',       label: 'Dropped',       color: 'bg-red-500' },
-            { key: 'Completed',     label: 'Completed',     color: 'bg-purple-500' },
+            { key: 'Dropped', label: 'Dropped', color: 'bg-red-500' },
+            { key: 'Completed', label: 'Completed', color: 'bg-purple-500' },
           ];
           const STATUS_COLORS: Record<string, string> = {
             'Watching': 'bg-green-500', 'On-Hold': 'bg-yellow-500',
@@ -2308,30 +2562,83 @@ const ProfilePage = () => {
           <div className="max-w-lg space-y-5">
             <div>
               <h2 className="text-lg font-bold text-white mb-1">MyAnimeList Import</h2>
-              <p className="text-gray-400 text-sm">Sync your MAL anime list by username or XML export.</p>
+              <p className="text-gray-400 text-sm">Sync your MAL anime list via the official API (OAuth) or fallback XML export.</p>
             </div>
 
             {/* Mode toggle */}
             <div className="flex bg-[#151619] rounded-xl overflow-hidden border border-white/5 p-1 gap-1">
-              {(['username', 'xml'] as const).map(m => (
+              {(['oauth', 'username', 'xml'] as const).map(m => (
                 <button key={m} onClick={() => { setMalImportMode(m); setImportResult(null); }}
                   className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition ${malImportMode === m ? 'bg-brand-500 text-white shadow' : 'text-gray-400 hover:text-white'}`}>
-                  {m === 'username' ? '👤 Username' : '📄 XML File'}
+                  {m === 'oauth' ? '🔑 MAL Account' : m === 'username' ? '👤 Username' : '📄 XML File'}
                 </button>
               ))}
             </div>
 
-            {malImportMode === 'username' ? (
+            {malImportMode === 'oauth' ? (
+              <div className="space-y-4">
+                <div className="bg-[#1a1b1f] border border-white/5 rounded-xl p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-white">Connection</p>
+                      <p className="text-xs text-gray-400">
+                        {malAccessToken ? (
+                          <>Connected{malProfileName ? ` as ${malProfileName}` : ''}</>
+                        ) : 'Not connected'}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      {malAccessToken && (
+                        <button onClick={handleDisconnectMAL} className="text-xs text-gray-400 hover:text-white underline underline-offset-2">
+                          Disconnect
+                        </button>
+                      )}
+                      <button
+                        onClick={handleConnectMAL}
+                        disabled={malConnecting}
+                        className="bg-brand-500 hover:bg-brand-600 text-white text-xs font-bold px-3 py-2 rounded-lg transition disabled:opacity-60">
+                        {malConnecting ? 'Opening…' : malAccessToken ? 'Reconnect' : 'Connect MAL'}
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Uses MAL OAuth (PKCE). We never see your password. Redirect URI must match VITE_MAL_REDIRECT_URI.
+                  </p>
+                  {malAuthMessage && (
+                    <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/40 rounded-lg p-2">
+                      {malAuthMessage}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">Import Mode</label>
+                  <div className="flex gap-2">
+                    {(['merge', 'replace'] as const).map(mode => (
+                      <button key={mode} onClick={() => setMalMode(mode)}
+                        className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition ${malMode === mode ? 'bg-brand-500 text-white border-brand-500' : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'}`}>
+                        {mode === 'merge' ? '🔀 Merge' : '♻️ Replace'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <button onClick={handleMALImportOAuth} disabled={importing || !malAccessToken}
+                  className="w-full bg-brand-500 hover:bg-brand-600 text-white font-bold py-3 rounded-xl transition disabled:opacity-50 flex items-center justify-center gap-2">
+                  {importing
+                    ? <><div className="animate-spin rounded-full h-4 w-4 border-t-2 border-white" /> Importing...</>
+                    : '📥 Import from MyAnimeList'}
+                </button>
+              </div>
+            ) : malImportMode === 'username' ? (
               <div className="space-y-4">
                 <div>
                   <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">MAL Username</label>
                   <input
                     value={malUsername}
                     onChange={e => { setMalUsername(e.target.value); setImportResult(null); }}
-                    placeholder="e.g. Jaypee123"
+                    placeholder="e.g. your_mal_username"
                     className="w-full bg-[#1a1b1f] text-white px-4 py-3 rounded-xl border border-white/10 focus:outline-none focus:border-brand-500/50 transition text-sm"
                   />
-                  <p className="text-xs text-gray-600 mt-1.5">Your MAL profile must be set to <span className="text-gray-400">Public</span>.</p>
+                  <p className="text-xs text-gray-600 mt-1.5">Your MAL profile must be <span className="text-gray-400">Public</span>. Uses Jikan (public MAL mirror).</p>
                 </div>
                 <div>
                   <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">Import Mode</label>
@@ -3497,6 +3804,7 @@ const AppInner = () => {
   return (
     <TitleLangContext.Provider value={{ lang, setLang }}>
       <HashRouter>
+        <MALCallbackHandler />
         <ScrollToTop />
         <div className="bg-[#202125] min-h-screen text-white font-sans selection:bg-brand-500 selection:text-white">
           <NavBar />
