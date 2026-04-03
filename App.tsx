@@ -1234,7 +1234,9 @@ const HomePage = () => {
         setSeasonalAnime(seasonal.data);
         setPopularAnime(popular.data);
         // Sort newest first, deduplicate by anime id, limit to 20
-        const sorted = recentSchedule.sort((a, b) => b.airingAt - a.airingAt);
+        const sorted = recentSchedule
+          .filter(item => item.airingAt <= now) // keep only already aired
+          .sort((a, b) => b.airingAt - a.airingAt);
         const seen = new Set<string>();
         const deduped = sorted
           .filter(item => item.media?.mal_id) // skip entries without MAL id (can't open details)
