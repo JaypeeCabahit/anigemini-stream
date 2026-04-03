@@ -1217,12 +1217,14 @@ const HomePage = () => {
         // Sort newest first, deduplicate by anime id, limit to 20
         const sorted = recentSchedule.sort((a, b) => b.airingAt - a.airingAt);
         const seen = new Set<string>();
-        const deduped = sorted.filter(item => {
-          const key = item.media.mal_id;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
+        const deduped = sorted
+          .filter(item => item.media?.mal_id) // skip entries without MAL id (can't open details)
+          .filter(item => {
+            const key = String(item.media.mal_id);
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
         setLatestEpisodes(deduped.slice(0, 20));
       } catch (err) {
         console.error('Failed to load home page data:', err);
