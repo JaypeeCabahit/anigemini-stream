@@ -72,9 +72,9 @@ interface AuthState {
   onlineUserIds: string[];
   login: () => Promise<void>;
   logout: () => Promise<void>;
-  addToWatchlist: (anime: Anime) => Promise<void>;
+  addToWatchlist: (anime: Anime, status?: string) => Promise<void>;
+  updateWatchStatus: (id: string, status: string) => Promise<void>;
   removeFromWatchlist: (id: string) => Promise<void>;
-  updateWatchStatus: (animeId: string, status: string | null) => Promise<void>;
   saveWatchHistory: (entry: WatchHistoryEntry) => Promise<void>;
   saveProgress: (animeId: string, episodeId: string, currentTime: number, duration: number, episodeNumber?: number) => Promise<void>;
   getProgress: (animeId: string, episodeId: string, episodeNumber?: number) => number;
@@ -280,21 +280,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return obj;
   };
 
-  const addToWatchlist = async (anime: Anime) => {
+  const addToWatchlist = async (anime: Anime, status = 'Plan to Watch') => {
     if (!user) return;
-    const normalized = sanitize({ ...anime, mal_id: String(anime.mal_id) });
-    if (watchlist.find(a => a.mal_id === normalized.mal_id)) return;
+    const normalized = sanitize({ ...anime, mal_id: String(anime.mal_id), _watchStatus: status });
+    // Allow re-adding to update status
     await set(ref(db, `users/${user.uid}/watchlist/${normalized.mal_id}`), normalized);
+  };
+
+  const updateWatchStatus = async (id: string, status: string) => {
+    if (!user) return;
+    await update(ref(db, `users/${user.uid}/watchlist/${id}`), { _watchStatus: status });
   };
 
   const removeFromWatchlist = async (id: string) => {
     if (!user) return;
     await set(ref(db, `users/${user.uid}/watchlist/${id}`), null);
-  };
-
-  const updateWatchStatus = async (animeId: string, status: string | null) => {
-    if (!user) return;
-    await update(ref(db, `users/${user.uid}/watchlist/${animeId}`), { watchStatus: status });
   };
 
   const saveWatchHistory = async (entry: WatchHistoryEntry) => {
@@ -416,8 +416,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       login,
       logout,
       addToWatchlist,
-      removeFromWatchlist,
       updateWatchStatus,
+      removeFromWatchlist,
       saveWatchHistory,
       saveProgress,
       getProgress,

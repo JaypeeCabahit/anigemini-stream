@@ -422,6 +422,63 @@ const NavBar = () => {
   );
 };
 
+// ─── Watchlist Status Modal ───────────────────────────────────────────────────
+const WATCH_STATUSES = ['Watching', 'Completed', 'On-Hold', 'Plan to Watch', 'Dropped'] as const;
+type WatchStatus = typeof WATCH_STATUSES[number];
+
+const STATUS_META: Record<WatchStatus, { color: string; icon: string }> = {
+  'Watching':      { color: 'bg-brand-500',  icon: '▶' },
+  'Completed':     { color: 'bg-green-600',  icon: '✓' },
+  'On-Hold':       { color: 'bg-yellow-500', icon: '⏸' },
+  'Plan to Watch': { color: 'bg-blue-600',   icon: '📋' },
+  'Dropped':       { color: 'bg-red-700',    icon: '✕' },
+};
+
+interface WatchlistModalProps {
+  anime: Anime;
+  currentStatus?: string;
+  onClose: () => void;
+  onSelect: (status: WatchStatus) => void;
+}
+const WatchlistModal = ({ anime, currentStatus, onClose, onSelect }: WatchlistModalProps) => {
+  const { lang } = useTitleLang();
+  return (
+    <div className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+      <div className="relative w-full max-w-sm bg-[#1a1b1f] border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+        onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center gap-3 p-4 border-b border-white/5">
+          <img src={anime.images.jpg.image_url} alt="" className="w-10 h-14 rounded-lg object-cover flex-shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs text-gray-500 mb-0.5">Add to your list</p>
+            <h3 className="text-sm font-bold text-white line-clamp-2 leading-snug">{getDisplayTitle(anime, lang)}</h3>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-white p-1 flex-shrink-0">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        {/* Status options */}
+        <div className="p-3 space-y-1.5">
+          {WATCH_STATUSES.map(status => {
+            const meta = STATUS_META[status];
+            const isActive = currentStatus === status;
+            return (
+              <button key={status} onClick={() => onSelect(status)}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition
+                  ${isActive ? `${meta.color} text-white shadow-lg` : 'bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white'}`}>
+                <span className="text-base w-5 text-center">{meta.icon}</span>
+                {status}
+                {isActive && <span className="ml-auto text-xs opacity-70">Current</span>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const AnimeCard = ({ anime, rank }: { anime: Anime; rank?: number }) => {
   const year = anime.year || (anime.aired?.from ? new Date(anime.aired.from).getFullYear() : null);
   const { lang } = useTitleLang();
@@ -867,6 +924,13 @@ const ScheduleSection = () => {
   const [schedule, setSchedule] = useState<jikanService.AiringScheduleItem[]>([]);
   const [activeDay, setActiveDay] = useState(new Date().getDay()); // 0=Sun
   const [loading, setLoading] = useState(true);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const scrollSchedule = (dir: 'left' | 'right') => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollBy({ left: dir === 'right' ? 320 : -320, behavior: 'smooth' });
+    }
+  };
 
   useEffect(() => {
     const now = Math.floor(Date.now() / 1000);
@@ -930,26 +994,40 @@ const ScheduleSection = () => {
           No scheduled episodes for {DAYS[activeDay]}.
         </p>
       ) : (
-        <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">
-          {dayItems.slice(0, 20).map(item => {
-            const timeStr = new Date(item.airingAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            return (
-              <button key={item.id}
-                onClick={() => navigate(`/anime/${item.media.mal_id}`)}
-                className="group flex-shrink-0 w-32 bg-[#1e1f23] hover:bg-[#2a2c31] border border-white/5 hover:border-brand-500/30 rounded-xl p-2.5 text-left transition">
-                <div className="aspect-[3/4] rounded-lg overflow-hidden bg-gray-800 mb-2">
-                  <img src={item.media.images.jpg.image_url} alt={item.media.title}
-                    className="w-full h-full object-cover group-hover:scale-105 transition duration-300" />
-                </div>
-                <p className="text-xs font-semibold text-white line-clamp-2 group-hover:text-brand-400 transition leading-snug mb-1">{item.media.title}</p>
-                <div className="flex items-center gap-1 text-[10px] text-gray-500">
-                  <Clock className="w-3 h-3 text-brand-500" />
-                  <span>{timeStr}</span>
-                  <span className="ml-auto text-brand-400">EP {item.episode}</span>
-                </div>
-              </button>
-            );
-          })}
+        <div className="relative">
+          {/* Left arrow */}
+          <button onClick={() => scrollSchedule('left')}
+            className="absolute left-0 top-1/2 -translate-y-1/2 z-10 -ml-3 w-8 h-8 bg-[#2a2c31] hover:bg-brand-500 border border-white/10 rounded-full flex items-center justify-center text-white shadow-lg transition hidden md:flex">
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+
+          <div ref={scrollRef} className="flex gap-3 overflow-x-auto pb-2 no-scrollbar scroll-smooth">
+            {dayItems.slice(0, 30).map(item => {
+              const timeStr = new Date(item.airingAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              return (
+                <button key={item.id}
+                  onClick={() => navigate(`/anime/${item.media.mal_id}`)}
+                  className="group flex-shrink-0 w-28 sm:w-32 bg-[#1e1f23] hover:bg-[#2a2c31] border border-white/5 hover:border-brand-500/30 rounded-xl p-2.5 text-left transition">
+                  <div className="aspect-[3/4] rounded-lg overflow-hidden bg-gray-800 mb-2">
+                    <img src={item.media.images.jpg.image_url} alt={item.media.title}
+                      className="w-full h-full object-cover group-hover:scale-105 transition duration-300" />
+                  </div>
+                  <p className="text-xs font-semibold text-white line-clamp-2 group-hover:text-brand-400 transition leading-snug mb-1">{item.media.title}</p>
+                  <div className="flex items-center gap-1 text-[10px] text-gray-500">
+                    <Clock className="w-3 h-3 text-brand-500" />
+                    <span>{timeStr}</span>
+                    <span className="ml-auto text-brand-400">EP {item.episode}</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Right arrow */}
+          <button onClick={() => scrollSchedule('right')}
+            className="absolute right-0 top-1/2 -translate-y-1/2 z-10 -mr-3 w-8 h-8 bg-[#2a2c31] hover:bg-brand-500 border border-white/10 rounded-full flex items-center justify-center text-white shadow-lg transition hidden md:flex">
+            <ChevronRight className="w-4 h-4" />
+          </button>
         </div>
       )}
     </section>
@@ -964,7 +1042,6 @@ const SIDEBAR_TABS = [
 type SidebarTab = typeof SIDEBAR_TABS[number]['key'];
 
 const HomePage = () => {
-  const navigate = useNavigate();
   const [topAnime, setTopAnime] = useState<Anime[]>([]);
   const [seasonalAnime, setSeasonalAnime] = useState<Anime[]>([]);
   const [popularAnime, setPopularAnime] = useState<Anime[]>([]);
@@ -1056,35 +1133,11 @@ const HomePage = () => {
                   </h2>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 gap-y-8">
-                  {latestEpisodes.map(item => (
-                    <button key={item.id} onClick={() => navigate(`/anime/${item.media.mal_id}/watch`)}
-                      className="group relative block w-full text-left">
-                      <div className="relative aspect-[3/4] rounded-lg overflow-hidden bg-[#2a2c31]">
-                        {/* Badges */}
-                        <div className="absolute top-2 left-2 z-10 flex flex-col gap-1">
-                          <span className="bg-black/70 text-white text-[9px] font-black px-1.5 py-0.5 rounded">HD</span>
-                          <span className="bg-brand-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded">
-                            EP {item.episode}
-                          </span>
-                        </div>
-                        <img src={item.media.images.jpg.image_url} alt={item.media.title}
-                          className="w-full h-full object-cover object-top transition duration-500 group-hover:scale-105 group-hover:opacity-80" />
-                        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition duration-300 backdrop-blur-[2px] bg-black/20">
-                          <div className="bg-brand-500 rounded-full w-12 h-12 flex items-center justify-center shadow-xl transform scale-50 group-hover:scale-100 transition">
-                            <Play className="w-5 h-5 text-white fill-white ml-0.5" />
-                          </div>
-                        </div>
-                      </div>
-                      <div className="mt-2">
-                        <h3 className="text-white font-semibold text-sm line-clamp-1 group-hover:text-brand-400 transition">{item.media.title}</h3>
-                        <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500">
-                          <span>{item.media.type || 'TV'}</span>
-                          <span className="w-1 h-1 rounded-full bg-gray-600" />
-                          <span className="text-brand-400 font-medium">EP {item.episode}</span>
-                        </div>
-                      </div>
-                    </button>
-                  ))}
+                  {latestEpisodes.map(item => {
+                    // Wrap in AnimeCard for tooltip + lang toggle support
+                    const asAnime = item.media as Anime;
+                    return <AnimeCard key={item.id} anime={asAnime} />;
+                  })}
                 </div>
               </section>
             )}
@@ -1164,8 +1217,11 @@ const AnimeDetailsPage = () => {
   const [characters, setCharacters] = useState<jikanService.Character[]>([]);
   const [recommendations, setRecommendations] = useState<Anime[]>([]);
   const [loading, setLoading] = useState(true);
-  const { addToWatchlist, watchlist, user, login } = useAuth();
-  const isInWatchlist = id ? watchlist.some(a => a.mal_id === id) : false;
+  const { addToWatchlist, updateWatchStatus, watchlist, user, login } = useAuth();
+  const watchlistEntry = id ? watchlist.find(a => a.mal_id === id) : undefined;
+  const isInWatchlist = !!watchlistEntry;
+  const currentStatus = (watchlistEntry as any)?._watchStatus as string | undefined;
+  const [showWatchlistModal, setShowWatchlistModal] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -1214,11 +1270,12 @@ const AnimeDetailsPage = () => {
             <div className="rounded-xl overflow-hidden shadow-2xl shadow-black/50 border border-white/10 relative group">
               <img src={anime.images.webp.large_image_url} alt={anime.title} className="w-full h-auto object-cover object-top" />
               <button
-                onClick={() => !isInWatchlist && user ? addToWatchlist(anime) : (!user && login())}
-                className="absolute bottom-0 left-0 right-0 bg-brand-600 hover:bg-brand-500 text-white py-3 font-bold flex items-center justify-center gap-2 transition"
+                onClick={() => user ? setShowWatchlistModal(true) : login()}
+                className={`absolute bottom-0 left-0 right-0 py-3 font-bold flex items-center justify-center gap-2 transition text-white text-sm
+                  ${isInWatchlist ? 'bg-green-700 hover:bg-green-600' : 'bg-brand-600 hover:bg-brand-500'}`}
               >
                 {isInWatchlist ? <Heart className="fill-current w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                {isInWatchlist ? 'In Library' : 'Add to List'}
+                {isInWatchlist ? (currentStatus || 'In Library') : 'Add to List'}
               </button>
             </div>
           </div>
@@ -1303,6 +1360,20 @@ const AnimeDetailsPage = () => {
           </div>
         )}
       </div>
+
+      {/* Watchlist Status Modal */}
+      {showWatchlistModal && (
+        <WatchlistModal
+          anime={anime}
+          currentStatus={currentStatus}
+          onClose={() => setShowWatchlistModal(false)}
+          onSelect={async status => {
+            if (isInWatchlist) await updateWatchStatus(String(anime.mal_id), status);
+            else await addToWatchlist(anime, status);
+            setShowWatchlistModal(false);
+          }}
+        />
+      )}
     </div>
   );
 };
@@ -1792,6 +1863,8 @@ const ProfilePage = () => {
   const [adminSearching, setAdminSearching] = useState(false);
   // MAL import
   const [malFile, setMalFile] = useState<File | null>(null);
+  const [malUsername, setMalUsername] = useState('');
+  const [malImportMode, setMalImportMode] = useState<'username' | 'xml'>('username');
   const [malMode, setMalMode] = useState<'merge' | 'replace'>('merge');
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ success: boolean; count?: number; total?: number; error?: string } | null>(null);
@@ -1840,6 +1913,57 @@ const ProfilePage = () => {
     }
   };
 
+  const MAL_STATUS_MAP: Record<number, string> = {
+    1: 'Watching', 2: 'Completed', 3: 'On-Hold', 4: 'Dropped', 6: 'Plan to Watch',
+  };
+  const DEFAULT_POSTER = 'https://placehold.co/600x900?text=No+Image';
+
+  const applyImport = async (toAdd: Anime[]) => {
+    if (malMode === 'replace') await Promise.all(watchlist.map(a => removeFromWatchlist(a.mal_id)));
+    const existingIds = new Set(watchlist.map(a => a.mal_id));
+    const newEntries = malMode === 'merge' ? toAdd.filter(a => !existingIds.has(a.mal_id)) : toAdd;
+    await Promise.all(newEntries.map(a => addToWatchlist(a, (a as any)._watchStatus)));
+    setImportResult({ success: true, count: newEntries.length, total: toAdd.length });
+  };
+
+  const handleMALImportUsername = async () => {
+    if (!malUsername.trim()) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      // Jikan v4 public API — no auth needed, paginated
+      const allItems: Anime[] = [];
+      let page = 1;
+      let hasNext = true;
+      while (hasNext && page <= 10) {
+        const res = await fetch(`https://api.jikan.moe/v4/users/${encodeURIComponent(malUsername.trim())}/animelist?page=${page}&limit=300`);
+        if (!res.ok) throw new Error(res.status === 404 ? `User "${malUsername}" not found on MAL.` : `MAL API error (${res.status})`);
+        const json = await res.json();
+        const items: Anime[] = (json.data ?? []).map((entry: any) => ({
+          mal_id: String(entry.mal_id),
+          title: entry.title,
+          images: entry.images ?? { jpg: { image_url: DEFAULT_POSTER, large_image_url: DEFAULT_POSTER }, webp: { image_url: DEFAULT_POSTER, large_image_url: DEFAULT_POSTER } },
+          trailer: { youtube_id: '', url: '', embed_url: '', images: { image_url: DEFAULT_POSTER, small_image_url: DEFAULT_POSTER, medium_image_url: DEFAULT_POSTER, large_image_url: DEFAULT_POSTER, maximum_image_url: DEFAULT_POSTER } },
+          synopsis: '', score: entry.score ?? null, year: null,
+          episodes: entry.episodes ?? 0, status: '', genres: [], rating: '',
+          type: entry.type || 'TV', duration: '', rank: undefined,
+          _watchStatus: MAL_STATUS_MAP[entry.watching_status] ?? 'Plan to Watch',
+        } as any));
+        allItems.push(...items);
+        hasNext = json.pagination?.has_next_page ?? false;
+        page++;
+        if (hasNext) await new Promise(r => setTimeout(r, 400)); // respect rate limit
+      }
+      if (allItems.length === 0) throw new Error('No anime found on this MAL account.');
+      await applyImport(allItems);
+      setMalUsername('');
+    } catch (err: any) {
+      setImportResult({ success: false, error: err.message || 'Import failed' });
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const handleMALImport = async () => {
     if (!malFile) return;
     setImporting(true);
@@ -1850,19 +1974,16 @@ const ProfilePage = () => {
       const doc = parser.parseFromString(xmlText, 'text/xml');
       if (doc.querySelector('parsererror')) throw new Error('Invalid XML file');
       const animeEls = Array.from(doc.querySelectorAll('anime'));
-      if (animeEls.length === 0) throw new Error('No anime entries found in file. Make sure you uploaded an Anime List XML.');
-
-      const DEFAULT_POSTER = 'https://placehold.co/600x900?text=No+Image';
-      const statusMap: Record<string, string> = {
-        'Watching': 'watching', 'Completed': 'completed',
-        'On-Hold': 'on-hold', 'Dropped': 'dropped', 'Plan to Watch': 'plan-to-watch',
+      if (animeEls.length === 0) throw new Error('No anime entries found. Make sure you uploaded an Anime List XML.');
+      const xmlStatusMap: Record<string, string> = {
+        'Watching': 'Watching', 'Completed': 'Completed',
+        'On-Hold': 'On-Hold', 'Dropped': 'Dropped', 'Plan to Watch': 'Plan to Watch',
       };
       const toAdd: Anime[] = animeEls.map(el => {
         const get = (tag: string) => el.querySelector(tag)?.textContent?.trim() || '';
         const malId = get('series_animedb_id');
         const title = get('series_title');
         if (!malId || !title) return null;
-        const rawStatus = get('my_status');
         return {
           mal_id: malId, title,
           images: { jpg: { image_url: DEFAULT_POSTER, large_image_url: DEFAULT_POSTER }, webp: { image_url: DEFAULT_POSTER, large_image_url: DEFAULT_POSTER } },
@@ -1871,17 +1992,10 @@ const ProfilePage = () => {
           episodes: parseInt(get('series_episodes')) || 0,
           status: '', genres: [], rating: '',
           type: get('series_type') || 'TV', duration: '', rank: undefined,
-          watchStatus: statusMap[rawStatus] ?? null,
+          _watchStatus: xmlStatusMap[get('my_status')] ?? 'Plan to Watch',
         } as any;
       }).filter(Boolean) as Anime[];
-
-      if (malMode === 'replace') {
-        await Promise.all(watchlist.map(a => removeFromWatchlist(a.mal_id)));
-      }
-      const existingIds = new Set(watchlist.map(a => a.mal_id));
-      const newEntries = malMode === 'merge' ? toAdd.filter(a => !existingIds.has(a.mal_id)) : toAdd;
-      await Promise.all(newEntries.map(a => addToWatchlist(a)));
-      setImportResult({ success: true, count: newEntries.length, total: toAdd.length });
+      await applyImport(toAdd);
       setMalFile(null);
     } catch (err: any) {
       setImportResult({ success: false, error: err.message || 'Import failed' });
@@ -2111,31 +2225,31 @@ const ProfilePage = () => {
         {/* Watchlist tab */}
         {activeTab === 'watchlist' && (() => {
           const STATUS_FILTERS = [
-            { key: 'all', label: 'All', color: '' },
-            { key: 'watching', label: 'Watching', color: 'bg-green-500' },
-            { key: 'on-hold', label: 'On-Hold', color: 'bg-yellow-500' },
-            { key: 'plan-to-watch', label: 'Plan to Watch', color: 'bg-blue-500' },
-            { key: 'dropped', label: 'Dropped', color: 'bg-red-500' },
-            { key: 'completed', label: 'Completed', color: 'bg-purple-500' },
+            { key: 'all',           label: 'All',           color: '' },
+            { key: 'Watching',      label: 'Watching',      color: 'bg-green-500' },
+            { key: 'On-Hold',       label: 'On-Hold',       color: 'bg-yellow-500' },
+            { key: 'Plan to Watch', label: 'Plan to Watch', color: 'bg-blue-500' },
+            { key: 'Dropped',       label: 'Dropped',       color: 'bg-red-500' },
+            { key: 'Completed',     label: 'Completed',     color: 'bg-purple-500' },
           ];
           const STATUS_COLORS: Record<string, string> = {
-            'watching': 'bg-green-500', 'on-hold': 'bg-yellow-500',
-            'plan-to-watch': 'bg-blue-500', 'dropped': 'bg-red-500', 'completed': 'bg-purple-500',
+            'Watching': 'bg-green-500', 'On-Hold': 'bg-yellow-500',
+            'Plan to Watch': 'bg-blue-500', 'Dropped': 'bg-red-500', 'Completed': 'bg-purple-500',
           };
           const STATUS_LABELS: Record<string, string> = {
-            'watching': 'Watching', 'on-hold': 'On-Hold',
-            'plan-to-watch': 'Plan to Watch', 'dropped': 'Dropped', 'completed': 'Completed',
+            'Watching': 'Watching', 'On-Hold': 'On-Hold',
+            'Plan to Watch': 'PTW', 'Dropped': 'Dropped', 'Completed': 'Completed',
           };
           const filtered = watchStatusFilter === 'all'
             ? watchlist
-            : watchlist.filter(a => ((a as any).watchStatus ?? '') === watchStatusFilter);
+            : watchlist.filter(a => ((a as any)._watchStatus ?? '') === watchStatusFilter);
 
           return (
             <div>
               {/* Status filter tabs */}
               <div className="flex gap-2 mb-5 overflow-x-auto no-scrollbar pb-1">
                 {STATUS_FILTERS.map(f => {
-                  const count = f.key === 'all' ? watchlist.length : watchlist.filter(a => ((a as any).watchStatus ?? '') === f.key).length;
+                  const count = f.key === 'all' ? watchlist.length : watchlist.filter(a => ((a as any)._watchStatus ?? '') === f.key).length;
                   return (
                     <button key={f.key} onClick={() => setWatchStatusFilter(f.key)}
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition border ${watchStatusFilter === f.key ? 'bg-white/15 text-white border-white/20' : 'text-gray-400 border-white/5 hover:text-white'}`}>
@@ -2150,7 +2264,7 @@ const ProfilePage = () => {
                 ? <p className="text-gray-500 text-sm">No anime in this category.</p>
                 : <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                   {filtered.map(anime => {
-                    const currentStatus = (anime as any).watchStatus ?? '';
+                    const currentStatus = (anime as any)._watchStatus ?? '';
                     return (
                       <div key={anime.mal_id} className="relative group">
                         <AnimeCard anime={anime} />
@@ -2169,16 +2283,16 @@ const ProfilePage = () => {
                         <div className="absolute bottom-[52px] left-0 right-0 opacity-0 group-hover:opacity-100 transition px-1">
                           <select
                             value={currentStatus}
-                            onChange={e => updateWatchStatus(anime.mal_id, e.target.value || null)}
-                            onClick={e => e.preventDefault()}
+                            onChange={e => updateWatchStatus(anime.mal_id, e.target.value)}
+                            onClick={e => e.stopPropagation()}
                             className="w-full bg-black/90 text-white text-[10px] font-semibold py-1 px-1.5 rounded border border-white/10 focus:outline-none cursor-pointer"
                           >
                             <option value="">— Set Status —</option>
-                            <option value="watching">Watching</option>
-                            <option value="plan-to-watch">Plan to Watch</option>
-                            <option value="completed">Completed</option>
-                            <option value="on-hold">On-Hold</option>
-                            <option value="dropped">Dropped</option>
+                            <option value="Watching">Watching</option>
+                            <option value="Plan to Watch">Plan to Watch</option>
+                            <option value="Completed">Completed</option>
+                            <option value="On-Hold">On-Hold</option>
+                            <option value="Dropped">Dropped</option>
                           </select>
                         </div>
                       </div>
@@ -2191,47 +2305,95 @@ const ProfilePage = () => {
 
         {/* MAL Import tab */}
         {activeTab === 'mal' && (
-          <div className="max-w-lg">
-            <h2 className="text-lg font-bold text-white mb-1">MyAnimeList Import</h2>
-            <p className="text-gray-400 text-sm mb-2">Export your anime list from MAL as XML, then upload it here.</p>
-            <a href="https://myanimelist.net/panel.php?go=export" target="_blank" rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 underline underline-offset-2 mb-5 block">
-              → Go to MAL Export Page (Profile → Export → Anime List XML)
-            </a>
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">Anime List XML File</label>
-                <label className={`flex flex-col items-center justify-center gap-2 w-full py-8 rounded-xl border-2 border-dashed cursor-pointer transition ${malFile ? 'border-brand-500/60 bg-brand-500/5' : 'border-white/10 hover:border-white/30 bg-white/2'}`}>
-                  <input type="file" accept=".xml" className="hidden" onChange={e => { setMalFile(e.target.files?.[0] ?? null); setImportResult(null); }} />
-                  {malFile
-                    ? <><span className="text-2xl">📄</span><span className="text-sm text-white font-semibold">{malFile.name}</span><span className="text-xs text-gray-500">{(malFile.size / 1024).toFixed(1)} KB · Click to change</span></>
-                    : <><span className="text-2xl">📂</span><span className="text-sm text-gray-400">Click to select XML file</span></>}
-                </label>
-              </div>
-              <div>
-                <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">Import Mode</label>
-                <div className="flex gap-2">
-                  {(['merge', 'replace'] as const).map(mode => (
-                    <button key={mode} onClick={() => setMalMode(mode)}
-                      className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition ${malMode === mode ? 'bg-brand-500 text-white border-brand-500' : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'}`}>
-                      {mode === 'merge' ? '🔀 Merge (keep existing)' : '♻️ Replace (clear & import)'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <button onClick={handleMALImport} disabled={importing || !malFile}
-                className="w-full bg-brand-500 hover:bg-brand-600 text-white font-bold py-3 rounded-xl transition disabled:opacity-50 flex items-center justify-center gap-2">
-                {importing ? <><div className="animate-spin rounded-full h-4 w-4 border-t-2 border-white" /> Importing...</> : '📥 Import from MAL'}
-              </button>
-              {importResult && (
-                <div className={`p-4 rounded-xl border text-sm ${importResult.success ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-red-500/10 border-red-500/30 text-red-400'}`}>
-                  {importResult.success
-                    ? `✅ Imported ${importResult.count} anime${importResult.total && importResult.total !== importResult.count ? ` (${importResult.total - importResult.count!} already in list)` : ''}`
-                    : `❌ ${importResult.error}`}
-                </div>
-              )}
-              <p className="text-xs text-gray-600">Anime images will load automatically when you view each title. Statuses (Watching, Completed, etc.) are imported too.</p>
+          <div className="max-w-lg space-y-5">
+            <div>
+              <h2 className="text-lg font-bold text-white mb-1">MyAnimeList Import</h2>
+              <p className="text-gray-400 text-sm">Sync your MAL anime list by username or XML export.</p>
             </div>
+
+            {/* Mode toggle */}
+            <div className="flex bg-[#151619] rounded-xl overflow-hidden border border-white/5 p-1 gap-1">
+              {(['username', 'xml'] as const).map(m => (
+                <button key={m} onClick={() => { setMalImportMode(m); setImportResult(null); }}
+                  className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition ${malImportMode === m ? 'bg-brand-500 text-white shadow' : 'text-gray-400 hover:text-white'}`}>
+                  {m === 'username' ? '👤 Username' : '📄 XML File'}
+                </button>
+              ))}
+            </div>
+
+            {malImportMode === 'username' ? (
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">MAL Username</label>
+                  <input
+                    value={malUsername}
+                    onChange={e => { setMalUsername(e.target.value); setImportResult(null); }}
+                    placeholder="e.g. Jaypee123"
+                    className="w-full bg-[#1a1b1f] text-white px-4 py-3 rounded-xl border border-white/10 focus:outline-none focus:border-brand-500/50 transition text-sm"
+                  />
+                  <p className="text-xs text-gray-600 mt-1.5">Your MAL profile must be set to <span className="text-gray-400">Public</span>.</p>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">Import Mode</label>
+                  <div className="flex gap-2">
+                    {(['merge', 'replace'] as const).map(mode => (
+                      <button key={mode} onClick={() => setMalMode(mode)}
+                        className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition ${malMode === mode ? 'bg-brand-500 text-white border-brand-500' : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'}`}>
+                        {mode === 'merge' ? '🔀 Merge' : '♻️ Replace'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <button onClick={handleMALImportUsername} disabled={importing || !malUsername.trim()}
+                  className="w-full bg-brand-500 hover:bg-brand-600 text-white font-bold py-3 rounded-xl transition disabled:opacity-50 flex items-center justify-center gap-2">
+                  {importing
+                    ? <><div className="animate-spin rounded-full h-4 w-4 border-t-2 border-white" /> Importing...</>
+                    : '📥 Import by Username'}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">Anime List XML File</label>
+                  <a href="https://myanimelist.net/panel.php?go=export" target="_blank" rel="noopener noreferrer"
+                    className="text-xs text-brand-400 hover:text-brand-300 underline underline-offset-2 mb-3 block">
+                    → Profile → Export → Anime List XML
+                  </a>
+                  <label className={`flex flex-col items-center justify-center gap-2 w-full py-8 rounded-xl border-2 border-dashed cursor-pointer transition ${malFile ? 'border-brand-500/60 bg-brand-500/5' : 'border-white/10 hover:border-white/30'}`}>
+                    <input type="file" accept=".xml" className="hidden" onChange={e => { setMalFile(e.target.files?.[0] ?? null); setImportResult(null); }} />
+                    {malFile
+                      ? <><span className="text-2xl">📄</span><span className="text-sm text-white font-semibold">{malFile.name}</span><span className="text-xs text-gray-500">{(malFile.size / 1024).toFixed(1)} KB · Click to change</span></>
+                      : <><span className="text-2xl">📂</span><span className="text-sm text-gray-400">Click to select XML file</span></>}
+                  </label>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">Import Mode</label>
+                  <div className="flex gap-2">
+                    {(['merge', 'replace'] as const).map(mode => (
+                      <button key={mode} onClick={() => setMalMode(mode)}
+                        className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition ${malMode === mode ? 'bg-brand-500 text-white border-brand-500' : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'}`}>
+                        {mode === 'merge' ? '🔀 Merge' : '♻️ Replace'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <button onClick={handleMALImport} disabled={importing || !malFile}
+                  className="w-full bg-brand-500 hover:bg-brand-600 text-white font-bold py-3 rounded-xl transition disabled:opacity-50 flex items-center justify-center gap-2">
+                  {importing
+                    ? <><div className="animate-spin rounded-full h-4 w-4 border-t-2 border-white" /> Importing...</>
+                    : '📥 Import from XML'}
+                </button>
+              </div>
+            )}
+
+            {importResult && (
+              <div className={`p-4 rounded-xl border text-sm ${importResult.success ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-red-500/10 border-red-500/30 text-red-400'}`}>
+                {importResult.success
+                  ? `✅ Imported ${importResult.count} anime${importResult.total && importResult.total !== importResult.count ? ` (${importResult.total! - importResult.count!} skipped — already in list)` : ''}`
+                  : `❌ ${importResult.error}`}
+              </div>
+            )}
+            <p className="text-xs text-gray-600">Statuses (Watching, Completed, etc.) are imported. Cover images load when you view each title.</p>
           </div>
         )}
 
@@ -2386,6 +2548,7 @@ const MangaPage = () => {
   const [manhwa, setManhwa] = useState<Manga[]>([]);
   const [loading, setLoading] = useState(true);
   const [heroIndex, setHeroIndex] = useState(0);
+  const [mangaSidebarTab, setMangaSidebarTab] = useState<'trending' | 'popular'>('trending');
   const [emblaRef, emblaApi] = useEmblaCarousel({ loop: true, duration: 20 }, [Autoplay({ delay: 6000, stopOnInteraction: false })]);
 
   const onSelect = useCallback(() => { if (emblaApi) setHeroIndex(emblaApi.selectedScrollSnap()); }, [emblaApi]);
@@ -2477,45 +2640,87 @@ const MangaPage = () => {
         </div>
       )}
 
-      <div className="w-full max-w-[2500px] mx-auto px-4 sm:px-6 lg:px-8 mt-8 space-y-12">
-        {/* Trending */}
-        {trending.length > 0 && (
-          <section>
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-xl font-bold text-white uppercase tracking-tight">Trending Manga</h2>
-              <Link to="/manga/search?filter=trending" className="text-xs text-gray-400 hover:text-purple-400 flex items-center gap-1">View All <ChevronRight className="w-3 h-3" /></Link>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4">
-              {trending.map(m => <MangaCard key={String(m.mal_id)} manga={m} />)}
-            </div>
-          </section>
-        )}
+      <div className="w-full max-w-[2500px] mx-auto px-4 sm:px-6 lg:px-8 mt-8">
+        <div className="flex flex-col lg:flex-row gap-8">
 
-        {/* Popular */}
-        {popular.length > 0 && (
-          <section>
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-xl font-bold text-white uppercase tracking-tight">All-Time Popular</h2>
-              <Link to="/manga/search?filter=popular" className="text-xs text-gray-400 hover:text-purple-400 flex items-center gap-1">View All <ChevronRight className="w-3 h-3" /></Link>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4">
-              {popular.slice(0, 12).map(m => <MangaCard key={String(m.mal_id)} manga={m} />)}
-            </div>
-          </section>
-        )}
+          {/* Main content */}
+          <div className="flex-1 min-w-0 space-y-12">
+            {trending.length > 0 && (
+              <section>
+                <div className="flex items-center justify-between mb-5">
+                  <h2 className="text-xl font-bold text-white uppercase tracking-tight">Trending Manga</h2>
+                  <Link to="/manga/search?filter=trending" className="text-xs text-gray-400 hover:text-purple-400 flex items-center gap-1">View All <ChevronRight className="w-3 h-3" /></Link>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-7 gap-4">
+                  {trending.map(m => <MangaCard key={String(m.mal_id)} manga={m} />)}
+                </div>
+              </section>
+            )}
 
-        {/* Manhwa */}
-        {manhwa.length > 0 && (
-          <section>
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-xl font-bold text-white uppercase tracking-tight">Popular Manhwa</h2>
-              <Link to="/manga/search?filter=manhwa" className="text-xs text-gray-400 hover:text-purple-400 flex items-center gap-1">View All <ChevronRight className="w-3 h-3" /></Link>
+            {popular.length > 0 && (
+              <section>
+                <div className="flex items-center justify-between mb-5">
+                  <h2 className="text-xl font-bold text-white uppercase tracking-tight">All-Time Popular</h2>
+                  <Link to="/manga/search?filter=popular" className="text-xs text-gray-400 hover:text-purple-400 flex items-center gap-1">View All <ChevronRight className="w-3 h-3" /></Link>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-7 gap-4">
+                  {popular.slice(0, 12).map(m => <MangaCard key={String(m.mal_id)} manga={m} />)}
+                </div>
+              </section>
+            )}
+
+            {manhwa.length > 0 && (
+              <section>
+                <div className="flex items-center justify-between mb-5">
+                  <h2 className="text-xl font-bold text-white uppercase tracking-tight">Popular Manhwa</h2>
+                  <Link to="/manga/search?filter=manhwa" className="text-xs text-gray-400 hover:text-purple-400 flex items-center gap-1">View All <ChevronRight className="w-3 h-3" /></Link>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-7 gap-4">
+                  {manhwa.slice(0, 12).map(m => <MangaCard key={String(m.mal_id)} manga={m} />)}
+                </div>
+              </section>
+            )}
+          </div>
+
+          {/* Sidebar — Top Manga */}
+          <div className="hidden lg:block w-72 flex-shrink-0">
+            <div className="bg-[#2a2c31] rounded-xl p-4 sticky top-24 border border-purple-500/10">
+              <div className="mb-4 border-b border-white/5 pb-3">
+                <h3 className="text-base font-bold text-white mb-3">Top Manga</h3>
+                <div className="flex items-center bg-[#151619] rounded-lg overflow-hidden border border-white/5 w-full">
+                  {(['trending', 'popular'] as const).map(tab => (
+                    <button key={tab} onClick={() => setMangaSidebarTab(tab)}
+                      className={`flex-1 py-1.5 text-[10px] font-bold uppercase tracking-wide transition
+                        ${mangaSidebarTab === tab ? 'bg-purple-600 text-white' : 'text-gray-500 hover:text-white'}`}>
+                      {tab === 'trending' ? 'Trending' : 'Popular'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex flex-col gap-0">
+                {(mangaSidebarTab === 'trending' ? trending : popular).slice(0, 10).map((m, idx) => (
+                  <Link key={String(m.mal_id)} to={`/manga/${m.mal_id}`}
+                    className="flex gap-3 items-center p-2 rounded-lg hover:bg-white/5 transition border-b border-white/5 last:border-0 group">
+                    <div className={`flex-shrink-0 w-7 text-center font-black text-xl ${idx < 3 ? 'text-purple-400' : 'text-gray-600'}`}>
+                      {idx + 1}
+                    </div>
+                    <div className="w-10 h-14 flex-shrink-0 rounded overflow-hidden bg-gray-800">
+                      <img src={m.images.jpg.image_url} alt="" className="w-full h-full object-cover object-top" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-white truncate group-hover:text-purple-400 transition">{m.title_english || m.title}</p>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <span className="text-[10px] text-gray-500">{m.type || 'Manga'}</span>
+                        {m.score && <><span className="w-1 h-1 rounded-full bg-gray-700" /><span className="text-[10px] text-yellow-400 flex items-center gap-0.5"><Star className="w-2.5 h-2.5 fill-current" />{m.score}</span></>}
+                      </div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4">
-              {manhwa.slice(0, 12).map(m => <MangaCard key={String(m.mal_id)} manga={m} />)}
-            </div>
-          </section>
-        )}
+          </div>
+
+        </div>
       </div>
     </div>
   );
@@ -3182,13 +3387,15 @@ const LandingPage = () => {
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <button
               onClick={() => navigate('/home')}
-              className="sm:btn-shimmer sm:btn-shimmer-brand bg-brand-500 sm:bg-transparent flex items-center gap-2 text-white font-bold px-8 py-4 rounded-full shadow-xl shadow-brand-500/40 text-sm w-full sm:w-auto justify-center active:scale-95 sm:hover:scale-105 transition-transform duration-200"
+              style={{ background: 'linear-gradient(90deg,#c73652 0%,#e94560 30%,#ff6b81 50%,#e94560 70%,#c73652 100%)', backgroundSize: '200% auto', animation: 'shimmer 2.5s linear infinite' }}
+              className="flex items-center gap-2 text-white font-bold px-8 py-4 rounded-full shadow-xl shadow-brand-500/40 text-sm w-full sm:w-auto justify-center active:scale-95 hover:scale-105 transition-transform duration-200"
             >
               <PlayCircle className="w-5 h-5" /> Browse Anime
             </button>
             <button
               onClick={() => navigate('/manga')}
-              className="sm:btn-shimmer sm:btn-shimmer-purple bg-purple-700 sm:bg-transparent flex items-center gap-2 text-white font-bold px-8 py-4 rounded-full shadow-xl shadow-purple-500/40 text-sm w-full sm:w-auto justify-center active:scale-95 sm:hover:scale-105 transition-transform duration-200"
+              style={{ background: 'linear-gradient(90deg,#6d28d9 0%,#7c3aed 30%,#a855f7 50%,#7c3aed 70%,#6d28d9 100%)', backgroundSize: '200% auto', animation: 'shimmer 2.5s linear infinite' }}
+              className="flex items-center gap-2 text-white font-bold px-8 py-4 rounded-full shadow-xl shadow-purple-500/40 text-sm w-full sm:w-auto justify-center active:scale-95 hover:scale-105 transition-transform duration-200"
             >
               <BookOpen className="w-5 h-5" /> Browse Manga
             </button>
