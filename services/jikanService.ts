@@ -280,6 +280,56 @@ export interface AnimeRelation {
   relation: string;
 }
 
+// Fallback: fetch details directly from Jikan by MAL id
+export const getAnimeDetailsJikan = async (malId: string): Promise<Anime | null> => {
+  try {
+    const res = await fetch(`https://api.jikan.moe/v4/anime/${malId}/full`);
+    if (!res.ok) return null;
+    const json = await res.json();
+    const d = json?.data;
+    if (!d) return null;
+    const poster = d.images?.webp?.large_image_url || d.images?.jpg?.large_image_url || DEFAULT_POSTER;
+    return {
+      mal_id: String(d.mal_id),
+      title: d.title || d.title_english || d.title_japanese || 'Unknown Title',
+      images: {
+        jpg: { image_url: poster, large_image_url: poster },
+        webp: { image_url: poster, large_image_url: poster },
+      },
+      trailer: {
+        youtube_id: d.trailer?.youtube_id || '',
+        url: d.trailer?.url || '',
+        embed_url: d.trailer?.embed_url || '',
+        images: {
+          image_url: poster,
+          small_image_url: poster,
+          medium_image_url: poster,
+          large_image_url: poster,
+          maximum_image_url: poster,
+        },
+      },
+      synopsis: d.synopsis || '',
+      score: d.score ?? null,
+      year: d.year ?? null,
+      episodes: d.episodes ?? 0,
+      status: d.status || '',
+      genres: Array.isArray(d.genres) ? d.genres.map((g: any) => ({ name: g.name })) : [],
+      rating: d.rating || '',
+      type: d.type || 'TV',
+      duration: d.duration || '',
+      rank: d.rank ?? undefined,
+      _titles: {
+        english: d.title_english ?? null,
+        romaji: d.title ?? null,
+        native: d.title_japanese ?? null,
+      },
+    } as any;
+  } catch (err) {
+    console.error('Jikan details fallback error', err);
+    return null;
+  }
+};
+
 export const getAnimeFast = async (id: string): Promise<AnimeFastResult | null> => {
   try {
     const res = await fetch(`${API_BASE}/anime/${id}/fast`);

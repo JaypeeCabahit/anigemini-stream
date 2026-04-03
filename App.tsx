@@ -1426,14 +1426,22 @@ const AnimeDetailsPage = () => {
         setAnime(animeData);
         setCharacters(charData);
         setRecommendations(recData);
-        if (animeData) {
-          const seasonList = [{ mal_id: String(animeData.mal_id), title: animeData.title, relation: 'Current' } as jikanService.AnimeRelation];
+        let finalAnime = animeData;
+        if (!finalAnime) {
+          // Fallback to Jikan when AniList fails (common for schedule items)
+          const jikan = await jikanService.getAnimeDetailsJikan(id);
+          if (jikan) finalAnime = jikan;
+        }
+
+        if (finalAnime) {
+          const seasonList = [{ mal_id: String(finalAnime.mal_id), title: finalAnime.title, relation: 'Current' } as jikanService.AnimeRelation];
           rels
             .filter(r => r.relation === 'Sequel' || r.relation === 'Prequel')
             .forEach(r => {
               if (!seasonList.find(s => s.mal_id === r.mal_id)) seasonList.push(r);
             });
           setSeasonOptions(seasonList);
+          setAnime(finalAnime);
         } else {
           const fast = await jikanService.getAnimeFast(id);
           if (fast) {
