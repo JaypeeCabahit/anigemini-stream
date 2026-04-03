@@ -18,17 +18,56 @@ class CacheService {
   };
 
   set<T>(key: string, data: T, type: keyof typeof this.durations = 'anime'): void {
+    const item: CacheItem<T> = {
+      data,
+      timestamp: Date.now(),
+      expiresIn: this.durations[type],
+    };
+    const serialized = JSON.stringify(item);
     try {
-      const item: CacheItem<T> = {
-        data,
-        timestamp: Date.now(),
-        expiresIn: this.durations[type],
-      };
-      localStorage.setItem(this.prefix + key, JSON.stringify(item));
-    } catch (error) {
-      console.warn('Cache set failed:', error);
-      // If localStorage is full, clear old items
+      localStorage.setItem(this.prefix + key, serialized);
+    } catch {
+      // Storage full — evict expired entries first, then retry
       this.clearExpired();
+      try {
+        localStorage.setItem(this.prefix + key, serialized);
+      } catch {
+        // Still full — evict oldest cache entries until it fits or nothing left
+        this.evictOldest(serialized.length);
+        try {
+          localStorage.setItem(this.prefix + key, serialized);
+        } catch {
+          // Give up silently — cache miss is always safe
+        }
+      }
+    }
+  }
+
+  private evictOldest(neededBytes: number): void {
+    try {
+      const entries: { key: string; timestamp: number }[] = [];
+      for (const key of Object.keys(localStorage)) {
+        if (!key.startsWith(this.prefix)) continue;
+        try {
+          const raw = localStorage.getItem(key);
+          if (!raw) continue;
+          const parsed: CacheItem<any> = JSON.parse(raw);
+          entries.push({ key, timestamp: parsed.timestamp });
+        } catch {
+          localStorage.removeItem(key);
+        }
+      }
+      // Sort oldest first
+      entries.sort((a, b) => a.timestamp - b.timestamp);
+      let freed = 0;
+      for (const entry of entries) {
+        const item = localStorage.getItem(entry.key);
+        freed += item ? item.length : 0;
+        localStorage.removeItem(entry.key);
+        if (freed >= neededBytes) break;
+      }
+    } catch {
+      // ignore
     }
   }
 

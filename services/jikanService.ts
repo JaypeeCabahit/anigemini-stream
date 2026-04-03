@@ -278,6 +278,7 @@ export interface AiringScheduleItem {
 export interface AnimeRelation {
   mal_id: string;
   title: string;
+  englishTitle?: string;
   relation: string;
 }
 
