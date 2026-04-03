@@ -3723,6 +3723,8 @@ const AppInner = () => {
     return (stored === 'romaji' ? 'romaji' : 'english') as TitleLang;
   });
   const setLang = (l: TitleLang) => { setLangState(l); localStorage.setItem('titleLang', l); };
+  const location = useLocation();
+  const isLanding = location.pathname === '/';
 
   return (
     <TitleLangContext.Provider value={{ lang, setLang }}>
@@ -3730,7 +3732,7 @@ const AppInner = () => {
         <MALCallbackHandler />
         <ScrollToTop />
         <div className="bg-[#202125] min-h-screen text-white font-sans selection:bg-brand-500 selection:text-white">
-          <NavBar />
+          {!isLanding && <NavBar />}
           <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/home" element={<HomePage />} />
