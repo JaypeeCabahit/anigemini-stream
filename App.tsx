@@ -2184,31 +2184,30 @@ const ProfilePage = () => {
     setImporting(true);
     setImportResult(null);
     try {
-      // Jikan public API (no auth). User list must be public.
-      const allItems: Anime[] = [];
-      let page = 1;
-      let hasNext = true;
-      while (hasNext && page <= 10) { // safety cap ~3k entries
-        const res = await fetch(`https://api.jikan.moe/v4/users/${encodeURIComponent(malUsername.trim())}/animelist?page=${page}&limit=300`);
-        if (!res.ok) throw new Error(res.status === 404 ? `User "${malUsername}" not found or list is private.` : `MAL API error (${res.status}).`);
-        const json = await res.json();
-        const items: Anime[] = (json.data ?? []).map((entry: any) => ({
-          mal_id: String(entry.mal_id),
-          title: entry.title,
-          images: entry.images ?? { jpg: { image_url: DEFAULT_POSTER, large_image_url: DEFAULT_POSTER }, webp: { image_url: DEFAULT_POSTER, large_image_url: DEFAULT_POSTER } },
-          trailer: { youtube_id: '', url: '', embed_url: '', images: { image_url: DEFAULT_POSTER, small_image_url: DEFAULT_POSTER, medium_image_url: DEFAULT_POSTER, large_image_url: DEFAULT_POSTER, maximum_image_url: DEFAULT_POSTER } },
-          synopsis: '', score: entry.score ?? null, year: null,
-          episodes: entry.episodes ?? 0, status: '', genres: [], rating: '',
-          type: entry.type || 'TV', duration: '', rank: undefined,
-          _watchStatus: MAL_STATUS_MAP[entry.watching_status] ?? 'Plan to Watch',
-        } as any));
-        allItems.push(...items);
-        hasNext = json.pagination?.has_next_page ?? false;
-        page++;
-        if (hasNext) await new Promise(r => setTimeout(r, 400)); // respect rate limit
+      const res = await fetch(`/api/mal-list?username=${encodeURIComponent(malUsername.trim())}`);
+      if (!res.ok) {
+        const errTxt = await res.text();
+        throw new Error(errTxt ? errTxt : 'Failed to fetch list');
       }
-      if (allItems.length === 0) throw new Error('No anime found on this MAL account.');
-      await applyImport(allItems);
+      const json = await res.json();
+      const list = json.data as any[];
+      if (!Array.isArray(list) || list.length === 0) throw new Error('No anime found on this MAL account.');
+
+      const items: Anime[] = list.map((entry: any) => {
+        const image = entry.anime_image_path || DEFAULT_POSTER;
+        return {
+          mal_id: String(entry.anime_id),
+          title: entry.anime_title || entry.anime_title_eng || 'Untitled',
+          images: { jpg: { image_url: image, large_image_url: image }, webp: { image_url: image, large_image_url: image } },
+          trailer: { youtube_id: '', url: '', embed_url: '', images: { image_url: image, small_image_url: image, medium_image_url: image, large_image_url: image, maximum_image_url: image } },
+          synopsis: '', score: entry.score ?? null, year: null,
+          episodes: entry.anime_num_episodes ?? 0, status: '', genres: [], rating: '',
+          type: entry.anime_media_type_string || 'TV', duration: '', rank: undefined,
+          _watchStatus: MAL_STATUS_MAP[entry.status] ?? 'Plan to Watch',
+        } as any;
+      });
+
+      await applyImport(items);
       setMalUsername('');
     } catch (err: any) {
       setImportResult({ success: false, error: err.message || 'Import failed' });
