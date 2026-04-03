@@ -2,7 +2,7 @@
 import useEmblaCarousel from 'embla-carousel-react';
 import Autoplay from 'embla-carousel-autoplay';
 import { BrowserRouter, Routes, Route, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
-import { Search, Home, PlayCircle, Play, Pause, User, LogOut, Menu, X, Heart, Star, Plus, Info, Sparkles, LogIn, Lock, AlertCircle, ChevronRight, ChevronLeft, Calendar, Clock, Monitor, Mic, SkipForward, SkipBack, Lightbulb, Tv, Settings, MessageCircle, ChevronsRight, ChevronsLeft, Shuffle, Users, Edit3, Check, Globe, BookOpen } from 'lucide-react';
+import { Search, Home, PlayCircle, Play, Pause, User, LogOut, Menu, X, Heart, Star, Plus, Info, Sparkles, LogIn, Lock, AlertCircle, ChevronRight, ChevronLeft, Calendar, Clock, Monitor, Mic, SkipForward, SkipBack, Lightbulb, Tv, Settings, MessageCircle, ChevronsRight, ChevronsLeft, Shuffle, Users, Edit3, Check, Globe, BookOpen, Eye, EyeOff } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import * as jikanService from './services/jikanService';
 import * as geminiService from './services/geminiService';
@@ -2111,6 +2111,8 @@ const ProfilePage = () => {
   const [watchStatusFilter, setWatchStatusFilter] = useState<string>('all');
   // Settings
   const { settings, updateSetting } = useSettings();
+  // Email visibility
+  const [showEmail, setShowEmail] = useState(true);
 
   if (!user) return (
     <div className="min-h-screen bg-[#202125] flex flex-col items-center justify-center gap-4 text-white">
@@ -2311,7 +2313,17 @@ const ProfilePage = () => {
                 <span className="bg-brand-500/20 text-brand-400 border border-brand-500/30 text-xs font-bold px-2.5 py-0.5 rounded-full">{userProfile.customTag}</span>
               )}
             </div>
-            <p className="text-gray-500 text-xs mb-2">{user.email} · Joined {joinDate}</p>
+            <div className="flex items-center gap-2 text-gray-500 text-xs mb-2">
+              <span>{showEmail ? user.email : 'Hidden'}</span>
+              <button
+                onClick={() => setShowEmail(v => !v)}
+                className="text-gray-400 hover:text-white transition"
+                title={showEmail ? 'Hide email' : 'Show email'}
+              >
+                {showEmail ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+              <span>· Joined {joinDate}</span>
+            </div>
             {/* Bio */}
             {editingBio ? (
               <div className="flex gap-2 items-center">
