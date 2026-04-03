@@ -68,59 +68,52 @@ const beginMALAuth = async () => {
   window.location.href = authUrl;
 };
 
+const MAL_API_PROXY = `${import.meta.env.VITE_API_BASE ?? 'http://localhost:3001/api'}/mal`;
+
 const exchangeMALCode = async (code: string, verifier: string) => {
-  const params = new URLSearchParams({
-    client_id: MAL_CLIENT_ID,
-    grant_type: 'authorization_code',
-    code,
-    code_verifier: verifier,
-    redirect_uri: MAL_REDIRECT_URI,
-  });
-  const res = await fetch('https://myanimelist.net/v1/oauth2/token', {
+  const res = await fetch(`${MAL_API_PROXY}/token`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params.toString(),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, code_verifier: verifier, redirect_uri: MAL_REDIRECT_URI }),
   });
-  if (!res.ok) throw new Error('MAL token exchange failed.');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as any;
+    throw new Error(err?.error || 'MAL token exchange failed.');
+  }
   const data = await res.json();
   saveMALTokens(data);
   return data as { access_token: string; refresh_token?: string; expires_in: number };
 };
 
-const refreshMALToken = async () => {
+const refreshMALToken = async (): Promise<string | null> => {
   const refreshToken = localStorage.getItem(MAL_REFRESH_KEY);
-  if (!refreshToken || !MAL_CLIENT_ID) return null;
-  const params = new URLSearchParams({
-    client_id: MAL_CLIENT_ID,
-    grant_type: 'refresh_token',
-    refresh_token: refreshToken,
-    redirect_uri: MAL_REDIRECT_URI,
-  });
-  const res = await fetch('https://myanimelist.net/v1/oauth2/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params.toString(),
-  });
-  if (!res.ok) {
-    clearMALTokens();
-    return null;
-  }
-  const data = await res.json();
-  saveMALTokens(data);
-  return data.access_token as string;
+  if (!refreshToken) return null;
+  try {
+    const res = await fetch(`${MAL_API_PROXY}/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshToken, redirect_uri: MAL_REDIRECT_URI }),
+    });
+    if (!res.ok) { clearMALTokens(); return null; }
+    const data = await res.json();
+    saveMALTokens(data);
+    return data.access_token as string;
+  } catch { clearMALTokens(); return null; }
 };
 
 const fetchMALProfile = async (accessToken: string) => {
-  const res = await fetch('https://api.myanimelist.net/v2/users/@me', {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  if (data?.name) {
-    localStorage.setItem(MAL_PROFILE_KEY, data.name);
-    window.dispatchEvent(new Event('mal-auth-changed'));
-  }
-  return data;
+  try {
+    const res = await fetch(`${MAL_API_PROXY}/me`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as any;
+    if (data?.name) {
+      localStorage.setItem(MAL_PROFILE_KEY, data.name);
+      window.dispatchEvent(new Event('mal-auth-changed'));
+    }
+    return data;
+  } catch { return null; }
 };
 
 // --- Types ---
@@ -1620,9 +1613,12 @@ const AnimeDetailsPage = () => {
 
 const WatchPage = () => {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { saveWatchHistory, saveProgress, getProgress, addToWatchlist, removeFromWatchlist, watchlist, watchHistory, user, login } = useAuth();
   const { settings } = useSettings();
+  const { lang } = useTitleLang();
   const [anime, setAnime] = useState<Anime | null>(null);
+  const [seasonOptions, setSeasonOptions] = useState<jikanService.AnimeRelation[]>([]);
   const isInWatchlist = anime ? watchlist.some(a => a.mal_id === String(anime.mal_id)) : false;
   const [resumeTime, setResumeTime] = useState(0);
   const progressSaveTimer = useRef<any>(null);
@@ -1659,14 +1655,26 @@ const WatchPage = () => {
     const init = async () => {
       if (!id) return;
       setLoading(true);
+      setError('');
+      setSeasonOptions([]);
       try {
         const fast = await jikanService.getAnimeFast(id);
         if (!fast) {
-          setError('Anime not found.');
+          // Fallback: try getting anime details separately (no episodes, but at least show info)
+          const animeData = await jikanService.getAnimeDetails(id);
+          if (animeData) {
+            setAnime(animeData);
+            setEpisodes([]);
+            setStreamError('No stream found for this anime yet. Check back later.');
+          } else {
+            setError('Anime not found. The ID may be invalid or the anime is not available.');
+          }
+          setLoading(false);
           return;
         }
 
-        setAnime(fast.anime);
+        const animeData = fast.anime;
+        setAnime(animeData);
 
         const orderedEpisodes = [...fast.episodes].sort((a, b) => (a.number || 0) - (b.number || 0));
         setEpisodes(orderedEpisodes);
@@ -1678,7 +1686,23 @@ const WatchPage = () => {
           const startEp = lastEntry?.episodeNumber
             ? (orderedEpisodes.find(ep => ep.number === lastEntry.episodeNumber) ?? orderedEpisodes[0])
             : orderedEpisodes[0];
-          handleEpisodeSelect(startEp, fast.anime);
+          handleEpisodeSelect(startEp, animeData);
+        }
+
+        // Load season/relation options in background
+        if (animeData.mal_id) {
+          jikanService.getAnimeRelations(String(animeData.mal_id)).then(rels => {
+            const allowed = ['Sequel', 'Prequel', 'Other', 'Side story', 'Summary', 'Parent story', 'Alternative version', 'Alternative setting'];
+            const seasonList: jikanService.AnimeRelation[] = [
+              { mal_id: String(animeData.mal_id), title: animeData.title, relation: 'Current' }
+            ];
+            (rels || []).filter(r => allowed.includes(r.relation)).forEach(r => {
+              if (!seasonList.find(s => s.mal_id === r.mal_id)) seasonList.push(r);
+            });
+            const weight: Record<string, number> = { Current: 0, Prequel: 1, Sequel: 2, 'Side story': 3, Other: 4 };
+            seasonList.sort((a, b) => (weight[a.relation] ?? 9) - (weight[b.relation] ?? 9) || a.title.localeCompare(b.title));
+            if (seasonList.length > 1) setSeasonOptions(seasonList);
+          }).catch(() => {});
         }
       } catch (err) {
         console.error(err);
@@ -1777,6 +1801,24 @@ const WatchPage = () => {
         <div className="grid gap-6 xl:grid-cols-12">
           <div className="order-2 xl:order-1 xl:col-span-3 2xl:col-span-2">
             <div className="bg-[#1f2026] rounded-2xl border border-white/5 p-4 h-full flex flex-col">
+              {/* Season selector */}
+              {seasonOptions.length > 1 && (
+                <div className="mb-4">
+                  <label className="text-[11px] text-gray-500 uppercase tracking-wider block mb-1.5">Season / Series</label>
+                  <select
+                    value={id}
+                    onChange={e => navigate(`/anime/${e.target.value}/watch`)}
+                    className="w-full bg-[#151619] border border-white/10 text-white text-xs px-3 py-2 rounded-lg focus:outline-none focus:border-brand-500/50"
+                  >
+                    {seasonOptions.map(opt => (
+                      <option key={opt.mal_id} value={opt.mal_id}>
+                        {opt.relation === 'Current' ? '▶ ' : opt.relation === 'Prequel' ? '◀ ' : opt.relation === 'Sequel' ? '▶▶ ' : '• '}
+                        {opt.title.length > 30 ? opt.title.slice(0, 28) + '…' : opt.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="flex items-center justify-between text-sm text-gray-300">
                 <h3 className="font-bold text-white">Episodes ({episodes.length})</h3>
                 {currentEpisode && (
@@ -1875,18 +1917,20 @@ const WatchPage = () => {
               )}
             </div>
 
-            <div className="mt-6 bg-[#1f2026] rounded-2xl border border-white/5 p-4">
-              <div className="flex flex-wrap items-center gap-3 text-xs text-gray-400">
+            <div className="mt-4 bg-[#1f2026] rounded-2xl border border-white/5 p-4">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
                 <span className="bg-brand-600/90 text-white px-3 py-1 rounded-full font-bold text-[11px] tracking-wide">
                   EP {currentEpisode?.number || '--'}
                 </span>
                 <span className="px-3 py-1 rounded-full bg-white/10 text-white/80">{anime?.type || 'TV'}</span>
-                {anime?.rating && <span className="px-3 py-1 rounded-full bg-white/5">{anime.rating}</span>}
                 {anime?.status && <span className="px-3 py-1 rounded-full bg-white/5">{anime.status}</span>}
-                {anime?.episodes && <span className="px-3 py-1 rounded-full bg-white/5">{anime.episodes} Episodes</span>}
+                {anime?.episodes ? <span className="px-3 py-1 rounded-full bg-white/5">{anime.episodes} eps</span> : null}
+                {anime?.score ? <span className="px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-400 font-bold">★ {anime.score}</span> : null}
               </div>
-              <h1 className="text-2xl font-bold text-white mt-4">{anime?.title}</h1>
-              <p className="mt-3 text-gray-400 text-sm leading-relaxed">{anime?.synopsis}</p>
+              <h1 className="text-lg sm:text-2xl font-bold text-white mt-3 leading-tight">
+                {anime ? getDisplayTitle(anime, lang) : ''}
+              </h1>
+              <p className="mt-2 text-gray-400 text-sm leading-relaxed line-clamp-3">{anime?.synopsis}</p>
             </div>
           </div>
 
@@ -2119,11 +2163,28 @@ const ProfilePage = () => {
   const [adminSearching, setAdminSearching] = useState(false);
   // MAL import
   const [malFile, setMalFile] = useState<File | null>(null);
-  const [malUsername, setMalUsername] = useState('');
-  const [malImportMode, setMalImportMode] = useState<'username' | 'xml'>('username');
+  const [malImportMode, setMalImportMode] = useState<'oauth' | 'xml'>('oauth');
   const [malMode, setMalMode] = useState<'merge' | 'replace'>('merge');
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ success: boolean; count?: number; total?: number; error?: string } | null>(null);
+  const [malAuth, setMalAuth] = useState(() => ({
+    connected: !!getStoredMALToken(),
+    name: localStorage.getItem(MAL_PROFILE_KEY) ?? null,
+    error: localStorage.getItem(MAL_AUTH_ERROR_KEY) ?? null,
+  }));
+  useEffect(() => {
+    const sync = () => {
+      const err = localStorage.getItem(MAL_AUTH_ERROR_KEY);
+      setMalAuth({
+        connected: !!getStoredMALToken(),
+        name: localStorage.getItem(MAL_PROFILE_KEY) ?? null,
+        error: err,
+      });
+      if (err) { setTimeout(() => localStorage.removeItem(MAL_AUTH_ERROR_KEY), 4000); }
+    };
+    window.addEventListener('mal-auth-changed', sync);
+    return () => window.removeEventListener('mal-auth-changed', sync);
+  }, []);
   // Watchlist filter
   const [watchStatusFilter, setWatchStatusFilter] = useState<string>('all');
   // Settings
@@ -2185,36 +2246,61 @@ const ProfilePage = () => {
     setImportResult({ success: true, count: newEntries.length, total: toAdd.length });
   };
 
-  const handleMALImportUsername = async () => {
-    if (!malUsername.trim()) return;
+  const handleMALOAuthImport = async () => {
     setImporting(true);
     setImportResult(null);
     try {
-      const res = await fetch(`/api/mal-list?username=${encodeURIComponent(malUsername.trim())}`);
-      if (!res.ok) {
-        const errTxt = await res.text();
-        throw new Error(errTxt ? errTxt : 'Failed to fetch list');
+      let token = getStoredMALToken();
+      if (!token) {
+        // Try to refresh
+        token = await refreshMALToken();
       }
-      const json = await res.json();
-      const list = json.data as any[];
-      if (!Array.isArray(list) || list.length === 0) throw new Error('No anime found on this MAL account.');
+      if (!token) throw new Error('Not connected to MAL. Please connect first.');
 
-      const items: Anime[] = list.map((entry: any) => {
-        const image = entry.anime_image_path || DEFAULT_POSTER;
-        return {
-          mal_id: String(entry.anime_id),
-          title: entry.anime_title || entry.anime_title_eng || 'Untitled',
-          images: { jpg: { image_url: image, large_image_url: image }, webp: { image_url: image, large_image_url: image } },
-          trailer: { youtube_id: '', url: '', embed_url: '', images: { image_url: image, small_image_url: image, medium_image_url: image, large_image_url: image, maximum_image_url: image } },
-          synopsis: '', score: entry.score ?? null, year: null,
-          episodes: entry.anime_num_episodes ?? 0, status: '', genres: [], rating: '',
-          type: entry.anime_media_type_string || 'TV', duration: '', rank: undefined,
-          _watchStatus: MAL_STATUS_MAP[entry.status] ?? 'Plan to Watch',
-        } as any;
-      });
+      const API_BASE_URL = import.meta.env.VITE_API_BASE ?? 'http://localhost:3001/api';
+      const allItems: Anime[] = [];
+      let offset = 0;
+      const limit = 1000;
+      let hasMore = true;
 
-      await applyImport(items);
-      setMalUsername('');
+      while (hasMore) {
+        const res = await fetch(`${API_BASE_URL}/mal/animelist?limit=${limit}&offset=${offset}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.status === 401) {
+          // Token expired, try refresh
+          const refreshed = await refreshMALToken();
+          if (!refreshed) { clearMALTokens(); throw new Error('MAL session expired. Please reconnect.'); }
+          token = refreshed;
+          continue;
+        }
+        if (!res.ok) throw new Error(`MAL API error (${res.status})`);
+        const json = await res.json();
+        const entries: any[] = json?.data ?? [];
+
+        for (const entry of entries) {
+          const node = entry.node ?? entry;
+          const status = entry.list_status ?? {};
+          const image = node.main_picture?.large || node.main_picture?.medium || DEFAULT_POSTER;
+          allItems.push({
+            mal_id: String(node.id),
+            title: node.title || 'Untitled',
+            images: { jpg: { image_url: image, large_image_url: image }, webp: { image_url: image, large_image_url: image } },
+            trailer: { youtube_id: '', url: '', embed_url: '', images: { image_url: image, small_image_url: image, medium_image_url: image, large_image_url: image, maximum_image_url: image } },
+            synopsis: '', score: status.score ?? null, year: null,
+            episodes: node.num_episodes ?? 0, status: '', genres: [], rating: '',
+            type: node.media_type?.toUpperCase() || 'TV', duration: '', rank: undefined,
+            _watchStatus: MAL_STATUS_MAP[status.status ?? ''] ?? 'Plan to Watch',
+          } as any);
+        }
+
+        hasMore = !!json?.paging?.next && entries.length === limit;
+        offset += limit;
+        if (!hasMore || offset > 5000) break;
+      }
+
+      if (allItems.length === 0) throw new Error('No anime found on your MAL account.');
+      await applyImport(allItems);
     } catch (err: any) {
       setImportResult({ success: false, error: err.message || 'Import failed' });
     } finally {
@@ -2590,48 +2676,76 @@ const ProfilePage = () => {
           <div className="max-w-lg space-y-5">
             <div>
               <h2 className="text-lg font-bold text-white mb-1">MyAnimeList Import</h2>
-              <p className="text-gray-400 text-sm">Sync your MAL anime list by username or XML export.</p>
+              <p className="text-gray-400 text-sm">Sync your anime list directly from MAL or upload an XML export.</p>
             </div>
 
             {/* Mode toggle */}
             <div className="flex bg-[#151619] rounded-xl overflow-hidden border border-white/5 p-1 gap-1">
-              {(['username', 'xml'] as const).map(m => (
+              {(['oauth', 'xml'] as const).map(m => (
                 <button key={m} onClick={() => { setMalImportMode(m); setImportResult(null); }}
                   className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition ${malImportMode === m ? 'bg-brand-500 text-white shadow' : 'text-gray-400 hover:text-white'}`}>
-                  {m === 'username' ? 'Username' : 'XML File'}
+                  {m === 'oauth' ? 'Connect MAL' : 'XML File'}
                 </button>
               ))}
             </div>
 
-            {malImportMode === 'username' ? (
+            {malImportMode === 'oauth' ? (
               <div className="space-y-4">
-                <div>
-                  <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">MAL Username</label>
-                  <input
-                    value={malUsername}
-                    onChange={e => { setMalUsername(e.target.value); setImportResult(null); }}
-                    placeholder="e.g. your_mal_username"
-                    className="w-full bg-[#1a1b1f] text-white px-4 py-3 rounded-xl border border-white/10 focus:outline-none focus:border-brand-500/50 transition text-sm"
-                  />
-                  <p className="text-xs text-gray-600 mt-1.5">Your MAL profile must be <span className="text-gray-400">Public</span></p>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">Import Mode</label>
-                  <div className="flex gap-2">
-                    {(['merge', 'replace'] as const).map(mode => (
-                      <button key={mode} onClick={() => setMalMode(mode)}
-                        className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition ${malMode === mode ? 'bg-brand-500 text-white border-brand-500' : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'}`}>
-                        {mode === 'merge' ? 'Merge' : 'Replace'}
-                      </button>
-                    ))}
+                {/* Connection status */}
+                {malAuth.error && (
+                  <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+                    {malAuth.error}
                   </div>
-                </div>
-                <button onClick={handleMALImportUsername} disabled={importing || !malUsername.trim()}
-                  className="w-full bg-brand-500 hover:bg-brand-600 text-white font-bold py-3 rounded-xl transition disabled:opacity-50 flex items-center justify-center gap-2">
-                  {importing
-                    ? <><div className="animate-spin rounded-full h-4 w-4 border-t-2 border-white" /> Importing...</>
-                    : 'Import by Username'}
-                </button>
+                )}
+                {malAuth.connected ? (
+                  <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/20 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-green-400 font-bold text-sm">Connected to MAL</p>
+                      {malAuth.name && <p className="text-gray-400 text-xs mt-0.5">Signed in as <span className="text-white font-semibold">{malAuth.name}</span></p>}
+                    </div>
+                    <button onClick={() => { clearMALTokens(); setImportResult(null); }}
+                      className="text-xs font-bold text-red-400 hover:text-red-300 bg-red-500/10 border border-red-500/20 px-3 py-1.5 rounded-lg transition whitespace-nowrap">
+                      Disconnect
+                    </button>
+                  </div>
+                ) : (
+                  <div className="p-5 rounded-xl bg-[#1a1b1f] border border-white/5 text-center space-y-3">
+                    <div className="text-3xl">🔗</div>
+                    <p className="text-white font-semibold text-sm">Connect your MAL account</p>
+                    <p className="text-gray-500 text-xs">Securely sign in with MyAnimeList to import your full anime list including statuses.</p>
+                    <button
+                      onClick={() => beginMALAuth().catch(err => setImportResult({ success: false, error: err.message }))}
+                      className="w-full bg-[#2e51a2] hover:bg-[#3a60c0] text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2 text-sm"
+                    >
+                      Sign in with MyAnimeList
+                    </button>
+                  </div>
+                )}
+
+                {malAuth.connected && (
+                  <>
+                    <div>
+                      <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">Import Mode</label>
+                      <div className="flex gap-2">
+                        {(['merge', 'replace'] as const).map(mode => (
+                          <button key={mode} onClick={() => setMalMode(mode)}
+                            className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition ${malMode === mode ? 'bg-brand-500 text-white border-brand-500' : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'}`}>
+                            {mode === 'merge' ? 'Merge with existing' : 'Replace everything'}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[11px] text-gray-600 mt-1.5">
+                        {malMode === 'merge' ? 'Only adds new entries, keeps existing statuses.' : 'Clears your current watchlist, then imports all MAL entries.'}
+                      </p>
+                    </div>
+                    <button onClick={handleMALOAuthImport} disabled={importing}
+                      className="w-full bg-brand-500 hover:bg-brand-600 text-white font-bold py-3 rounded-xl transition disabled:opacity-50 flex items-center justify-center gap-2">
+                      {importing
+                        ? <><div className="animate-spin rounded-full h-4 w-4 border-t-2 border-white" /> Importing...</>
+                        : 'Import from MAL'}
+                    </button>
+                  </>
+                )}
               </div>
             ) : (
               <div className="space-y-4">
@@ -2639,7 +2753,7 @@ const ProfilePage = () => {
                   <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">Anime List XML File</label>
                   <a href="https://myanimelist.net/panel.php?go=export" target="_blank" rel="noopener noreferrer"
                     className="text-xs text-brand-400 hover:text-brand-300 underline underline-offset-2 mb-3 block">
-                    → Profile → Export → Anime List XML
+                    → MAL Profile → Export → Anime List XML
                   </a>
                   <label className={`flex flex-col items-center justify-center gap-2 w-full py-8 rounded-xl border-2 border-dashed cursor-pointer transition ${malFile ? 'border-brand-500/60 bg-brand-500/5' : 'border-white/10 hover:border-white/30'}`}>
                     <input type="file" accept=".xml" className="hidden" onChange={e => { setMalFile(e.target.files?.[0] ?? null); setImportResult(null); }} />
@@ -2675,7 +2789,7 @@ const ProfilePage = () => {
                   : `❌ ${importResult.error}`}
               </div>
             )}
-            <p className="text-xs text-gray-600">Statuses (Watching, Completed, etc.) are imported. Cover images load when you view each title.</p>
+            <p className="text-xs text-gray-600">Watch statuses (Watching, Completed, etc.) are carried over. Cover images load when you browse those titles.</p>
           </div>
         )}
 
