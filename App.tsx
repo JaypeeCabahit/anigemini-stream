@@ -1734,8 +1734,9 @@ const ProfilePage = () => {
   const [editingBio, setEditingBio] = useState(false);
   const [bioInput, setBioInput] = useState('');
   const [showBannerPicker, setShowBannerPicker] = useState(false);
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [showPhotoInput, setShowPhotoInput] = useState(false);
+  const [photoUrlInput, setPhotoUrlInput] = useState('');
+  const [savingPhoto, setSavingPhoto] = useState(false);
   // Admin tag assignment
   const [adminSearch, setAdminSearch] = useState('');
   const [adminResults, setAdminResults] = useState<import('./context/AuthContext').PublicUser[]>([]);
@@ -1771,17 +1772,15 @@ const ProfilePage = () => {
     setAdminSearch('');
   };
 
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploadingPhoto(true);
+  const handleSavePhotoUrl = async () => {
+    if (!photoUrlInput.trim()) return;
+    setSavingPhoto(true);
     try {
-      await uploadProfilePhoto(file);
-    } catch {
-      // Storage rules may deny — fall back to nothing
+      await updateCustomPhoto(photoUrlInput.trim());
+      setShowPhotoInput(false);
+      setPhotoUrlInput('');
     } finally {
-      setUploadingPhoto(false);
-      if (photoInputRef.current) photoInputRef.current.value = '';
+      setSavingPhoto(false);
     }
   };
 
@@ -1808,19 +1807,42 @@ const ProfilePage = () => {
       {/* Profile card */}
       <div className="max-w-5xl mx-auto px-4 -mt-16 relative z-10">
         <div className="flex flex-col sm:flex-row items-start sm:items-end gap-4 mb-6">
-          {/* Clickable avatar with upload overlay */}
-          <div className="relative flex-shrink-0 group cursor-pointer" onClick={() => photoInputRef.current?.click()}>
-            <img
-              src={userProfile.customPhotoURL ?? user.photoURL ?? ''}
-              alt="avatar"
-              className="w-24 h-24 rounded-full border-4 border-[#202125] object-cover shadow-2xl"
-            />
-            <div className="absolute inset-0 rounded-full bg-black/60 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
-              {uploadingPhoto
-                ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                : <span className="text-white text-[10px] font-bold text-center leading-tight px-1">Change<br/>Photo</span>}
+          {/* Avatar with change-photo popup */}
+          <div className="relative flex-shrink-0">
+            <div className="group cursor-pointer" onClick={() => { setShowPhotoInput(v => !v); setPhotoUrlInput(''); }}>
+              <img
+                src={userProfile.customPhotoURL ?? user.photoURL ?? ''}
+                alt="avatar"
+                className="w-24 h-24 rounded-full border-4 border-[#202125] object-cover shadow-2xl"
+              />
+              <div className="absolute inset-0 rounded-full bg-black/60 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                <span className="text-white text-[10px] font-bold text-center leading-tight px-1">Change<br/>Photo</span>
+              </div>
             </div>
-            <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+            {/* URL input popup */}
+            {showPhotoInput && (
+              <div className="absolute top-28 left-0 z-30 bg-[#1a1b1f] border border-white/10 rounded-xl p-3 shadow-2xl w-72">
+                <p className="text-xs text-gray-400 mb-2">Paste an image URL for your profile photo:</p>
+                <input
+                  autoFocus
+                  value={photoUrlInput}
+                  onChange={e => setPhotoUrlInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSavePhotoUrl(); if (e.key === 'Escape') setShowPhotoInput(false); }}
+                  placeholder="https://example.com/photo.jpg"
+                  className="w-full bg-white/10 text-white text-xs px-3 py-2 rounded-lg border border-white/20 focus:outline-none focus:border-brand-500 mb-2"
+                />
+                <div className="flex gap-2">
+                  <button onClick={handleSavePhotoUrl} disabled={savingPhoto || !photoUrlInput.trim()}
+                    className="flex-1 bg-brand-500 hover:bg-brand-600 text-white text-xs font-bold py-1.5 rounded-lg transition disabled:opacity-50">
+                    {savingPhoto ? 'Saving...' : 'Save'}
+                  </button>
+                  <button onClick={() => setShowPhotoInput(false)}
+                    className="px-3 bg-white/10 hover:bg-white/20 text-gray-300 text-xs font-bold py-1.5 rounded-lg transition">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
           <div className="flex-1 min-w-0 pb-1">
             <div className="flex flex-wrap items-center gap-2 mb-1">
