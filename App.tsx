@@ -2546,7 +2546,7 @@ const ProfilePage = () => {
               {(['username', 'xml'] as const).map(m => (
                 <button key={m} onClick={() => { setMalImportMode(m); setImportResult(null); }}
                   className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition ${malImportMode === m ? 'bg-brand-500 text-white shadow' : 'text-gray-400 hover:text-white'}`}>
-                  {m === 'username' ? '👤 Username' : '📄 XML File'}
+                  {m === 'username' ? 'Username' : 'XML File'}
                 </button>
               ))}
             </div>
@@ -2569,7 +2569,7 @@ const ProfilePage = () => {
                     {(['merge', 'replace'] as const).map(mode => (
                       <button key={mode} onClick={() => setMalMode(mode)}
                         className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition ${malMode === mode ? 'bg-brand-500 text-white border-brand-500' : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'}`}>
-                        {mode === 'merge' ? '🔀 Merge' : '♻️ Replace'}
+                        {mode === 'merge' ? 'Merge' : 'Replace'}
                       </button>
                     ))}
                   </div>
@@ -2578,7 +2578,7 @@ const ProfilePage = () => {
                   className="w-full bg-brand-500 hover:bg-brand-600 text-white font-bold py-3 rounded-xl transition disabled:opacity-50 flex items-center justify-center gap-2">
                   {importing
                     ? <><div className="animate-spin rounded-full h-4 w-4 border-t-2 border-white" /> Importing...</>
-                    : '📥 Import by Username'}
+                    : 'Import by Username'}
                 </button>
               </div>
             ) : (
@@ -2602,7 +2602,7 @@ const ProfilePage = () => {
                     {(['merge', 'replace'] as const).map(mode => (
                       <button key={mode} onClick={() => setMalMode(mode)}
                         className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition ${malMode === mode ? 'bg-brand-500 text-white border-brand-500' : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'}`}>
-                        {mode === 'merge' ? '🔀 Merge' : '♻️ Replace'}
+                        {mode === 'merge' ? 'Merge' : 'Replace'}
                       </button>
                     ))}
                   </div>
@@ -2611,7 +2611,7 @@ const ProfilePage = () => {
                   className="w-full bg-brand-500 hover:bg-brand-600 text-white font-bold py-3 rounded-xl transition disabled:opacity-50 flex items-center justify-center gap-2">
                   {importing
                     ? <><div className="animate-spin rounded-full h-4 w-4 border-t-2 border-white" /> Importing...</>
-                    : '📥 Import from XML'}
+                    : 'Import from XML'}
                 </button>
               </div>
             )}
