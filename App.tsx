@@ -3723,12 +3723,12 @@ const AppInner = () => {
     return (stored === 'romaji' ? 'romaji' : 'english') as TitleLang;
   });
   const setLang = (l: TitleLang) => { setLangState(l); localStorage.setItem('titleLang', l); };
-  const location = useLocation();
-  const isLanding = location.pathname === '/';
 
-  return (
-    <TitleLangContext.Provider value={{ lang, setLang }}>
-      <BrowserRouter>
+  const AppContent = () => {
+    const location = useLocation();
+    const isLanding = location.pathname === '/';
+    return (
+      <>
         <MALCallbackHandler />
         <ScrollToTop />
         <div className="bg-[#202125] min-h-screen text-white font-sans selection:bg-brand-500 selection:text-white">
@@ -3750,6 +3750,14 @@ const AppInner = () => {
           </Routes>
           <BottomNav />
         </div>
+      </>
+    );
+  };
+
+  return (
+    <TitleLangContext.Provider value={{ lang, setLang }}>
+      <BrowserRouter>
+        <AppContent />
       </BrowserRouter>
     </TitleLangContext.Provider>
   );
