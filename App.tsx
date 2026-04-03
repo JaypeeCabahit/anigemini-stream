@@ -2484,7 +2484,7 @@ const ProfilePage = () => {
                     placeholder="e.g. your_mal_username"
                     className="w-full bg-[#1a1b1f] text-white px-4 py-3 rounded-xl border border-white/10 focus:outline-none focus:border-brand-500/50 transition text-sm"
                   />
-                  <p className="text-xs text-gray-600 mt-1.5">Your MAL profile must be <span className="text-gray-400">Public</span>. Uses Jikan (public MAL mirror).</p>
+                  <p className="text-xs text-gray-600 mt-1.5">Your MAL profile must be <span className="text-gray-400">Public</span></p>
                 </div>
                 <div>
                   <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">Import Mode</label>
