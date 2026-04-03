@@ -272,6 +272,12 @@ export interface AiringScheduleItem {
   media: Anime;
 }
 
+export interface AnimeRelation {
+  mal_id: string;
+  title: string;
+  relation: string;
+}
+
 export const getAnimeFast = async (id: string): Promise<AnimeFastResult | null> => {
   try {
     const res = await fetch(`${API_BASE}/anime/${id}/fast`);
@@ -292,6 +298,34 @@ export const getAnimeFast = async (id: string): Promise<AnimeFastResult | null> 
   } catch (err) {
     console.error('AniList fast error:', err);
     return null;
+  }
+};
+
+export const getAnimeRelations = async (malId: string): Promise<AnimeRelation[]> => {
+  try {
+    return await cachedFetch(
+      `jikan-relations-${malId}`,
+      async () => {
+        const res = await fetch(`https://api.jikan.moe/v4/anime/${malId}/relations`);
+        if (!res.ok) return [];
+        const data = await res.json();
+        const rels = Array.isArray(data?.data) ? data.data : [];
+        const list: AnimeRelation[] = [];
+        rels.forEach((rel: any) => {
+          const relation = rel?.relation;
+          (rel?.entry ?? []).forEach((e: any) => {
+            if (e?.mal_id && e?.name) {
+              list.push({ mal_id: String(e.mal_id), title: e.name, relation });
+            }
+          });
+        });
+        return list;
+      },
+      'anime'
+    );
+  } catch (err) {
+    console.error('Jikan relations error', err);
+    return [];
   }
 };
 

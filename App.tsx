@@ -8,6 +8,7 @@ import * as jikanService from './services/jikanService';
 import * as geminiService from './services/geminiService';
 import * as streamingService from './services/streamingService';
 import * as mangaService from './services/mangaService';
+import * as aniskipService from './services/aniskipService';
 import { Anime, GeminiRecommendation, Manga, MangaChapter } from './types';
 import { AnimeCardSkeleton, HeroSkeleton, DetailsSkeleton, EpisodeListSkeleton } from './components/LoadingSkeleton';
 import { LazyImage } from './components/LazyImage';
@@ -891,12 +892,14 @@ const Hero = ({ animeList }: { animeList: Anime[] }) => {
   );
 };
 
-const VideoPlayer = ({ src, poster, headers, isEmbed = false, startAt = 0, onProgress, onEnded, skipSeconds = 10 }: {
+const VideoPlayer = ({ src, poster, headers, isEmbed = false, startAt = 0, skipTo = 0, autoPlay = false, onProgress, onEnded, skipSeconds = 10 }: {
   src: string;
   poster?: string;
   headers?: Record<string, string>;
   isEmbed?: boolean;
   startAt?: number;
+  skipTo?: number;
+  autoPlay?: boolean;
   onProgress?: (currentTime: number, duration: number) => void;
   onEnded?: () => void;
   skipSeconds?: number;
@@ -989,6 +992,20 @@ const VideoPlayer = ({ src, poster, headers, isEmbed = false, startAt = 0, onPro
     };
   }, [src, headers, isEmbed]);
 
+  // Apply skip/resume when values change after load
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const target = Math.max(startAt || 0, skipTo || 0);
+    if (target > 0 && Math.abs((v.currentTime || 0) - target) > 0.5) {
+      v.currentTime = target;
+    }
+    if (autoPlay && !v.paused) return;
+    if (autoPlay && v.readyState >= 2) {
+      v.play().catch(() => { /* ignore */ });
+    }
+  }, [startAt, skipTo]);
+
   if (isEmbed) {
     return (
       <div className="w-full h-full bg-black">
@@ -1039,8 +1056,10 @@ const VideoPlayer = ({ src, poster, headers, isEmbed = false, startAt = 0, onPro
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
         onCanPlay={() => {
-          if (startAt > 0 && videoRef.current) {
-            videoRef.current.currentTime = startAt;
+          if (videoRef.current) {
+            const target = Math.max(startAt || 0, skipTo || 0);
+            if (target > 0) videoRef.current.currentTime = target;
+            if (autoPlay) videoRef.current.play().catch(() => { /* ignore */ });
           }
         }}
         onTimeUpdate={() => {
@@ -1365,8 +1384,10 @@ const HomePage = () => {
 
 const AnimeDetailsPage = () => {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { lang } = useTitleLang();
   const [anime, setAnime] = useState<Anime | null>(null);
+  const [seasonOptions, setSeasonOptions] = useState<jikanService.AnimeRelation[]>([]);
   const [characters, setCharacters] = useState<jikanService.Character[]>([]);
   const [recommendations, setRecommendations] = useState<Anime[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1382,8 +1403,9 @@ const AnimeDetailsPage = () => {
       Promise.all([
         jikanService.getAnimeDetails(id),
         jikanService.getAnimeCharacters(id),
-        jikanService.getAnimeRecommendations(id)
-      ]).then(async ([animeData, charData, recData]) => {
+        jikanService.getAnimeRecommendations(id),
+        jikanService.getAnimeRelations(id),
+      ]).then(async ([animeData, charData, recData, rels]) => {
         // If AniList reports "Not yet aired" but streaming episodes exist, fix the status
         if (animeData?.status === 'Not yet aired') {
           try {
@@ -1400,6 +1422,15 @@ const AnimeDetailsPage = () => {
         setAnime(animeData);
         setCharacters(charData);
         setRecommendations(recData);
+        if (animeData) {
+          const seasonList = [{ mal_id: String(animeData.mal_id), title: animeData.title, relation: 'Current' } as jikanService.AnimeRelation];
+          rels
+            .filter(r => r.relation === 'Sequel' || r.relation === 'Prequel')
+            .forEach(r => {
+              if (!seasonList.find(s => s.mal_id === r.mal_id)) seasonList.push(r);
+            });
+          setSeasonOptions(seasonList);
+        }
         setLoading(false);
       });
     }
@@ -1443,6 +1474,22 @@ const AnimeDetailsPage = () => {
             </div>
 
             <h1 className="text-2xl md:text-5xl font-black text-white mb-6 leading-tight">{getDisplayTitle(anime, lang)}</h1>
+            {seasonOptions.length > 1 && (
+              <div className="mb-5">
+                <label className="text-xs text-gray-500 uppercase tracking-wider mr-2">Seasons</label>
+                <select
+                  value={anime.mal_id}
+                  onChange={e => navigate(`/anime/${e.target.value}`)}
+                  className="bg-[#1a1b1f] border border-white/10 text-white text-sm px-3 py-2 rounded-lg"
+                >
+                  {seasonOptions.map(opt => (
+                    <option key={opt.mal_id} value={opt.mal_id}>
+                      {opt.title} {opt.relation === 'Prequel' ? '(Prev)' : opt.relation === 'Sequel' ? '(Next)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 mb-8">
               <span className="bg-white text-black text-xs font-black px-2 py-1 rounded">HD</span>
@@ -1542,6 +1589,7 @@ const WatchPage = () => {
   const [episodes, setEpisodes] = useState<streamingService.Episode[]>([]);
   const [currentEpisode, setCurrentEpisode] = useState<streamingService.Episode | null>(null);
   const [streamSource, setStreamSource] = useState<streamingService.StreamSource | null>(null);
+  const [introSkipTo, setIntroSkipTo] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadingSource, setLoadingSource] = useState(false);
   const [error, setError] = useState('');
@@ -1605,6 +1653,7 @@ const WatchPage = () => {
 
   const handleEpisodeSelect = async (episode: streamingService.Episode, animeOverride?: Anime) => {
     setCurrentEpisode(episode);
+    setIntroSkipTo(0);
     const index = episodes.findIndex(ep => ep.id === episode.id);
     if (index >= 0) {
       const targetPage = Math.floor(index / EPISODE_PAGE_SIZE);
@@ -1629,8 +1678,20 @@ const WatchPage = () => {
       const savedTime = id ? getProgress(id, episode.id, episode.number) : 0;
       setResumeTime(savedTime);
 
-      // Save to watch history — use animeOverride for first load since anime state may not be set yet
+      // Auto skip intro if enabled and data available
       const animeData = animeOverride ?? anime;
+      if (settings.autoSkipIntro && animeData?.mal_id && episode.number) {
+        const skip = await aniskipService.getIntroSkip(String(animeData.mal_id), episode.number);
+        if (skip.found && skip.segments[0]) {
+          setIntroSkipTo(Math.max(skip.segments[0].endTime || 0, 0));
+        } else {
+          setIntroSkipTo(0);
+        }
+      } else {
+        setIntroSkipTo(0);
+      }
+
+      // Save to watch history — use animeOverride for first load since anime state may not be set yet
       if (animeData) {
         saveWatchHistory({
           animeId: String(animeData.mal_id),
@@ -1743,6 +1804,8 @@ const WatchPage = () => {
                   headers={streamSource.headers}
                   isEmbed={streamSource.isEmbed}
                   startAt={resumeTime}
+                  skipTo={introSkipTo}
+                  autoPlay={settings.autoPlay}
                   skipSeconds={settings.skipSeconds}
                   onProgress={(currentTime, duration) => {
                     if (!currentEpisode || !id) return;
@@ -1998,7 +2061,7 @@ const groupByDate = (entries: import('./context/AuthContext').WatchHistoryEntry[
 };
 
 const ProfilePage = () => {
-  const { user, watchlist, watchHistory, removeFromWatchlist, updateWatchStatus, logout, addToWatchlist, userProfile, updateBio, updateBanner, updateListPrivacy, updateCustomPhoto, assignTagToUser, isAdmin, searchUsers } = useAuth();
+  const { user, watchlist, watchHistory, removeFromWatchlist, updateWatchStatus, logout, addToWatchlist, clearWatchlist, userProfile, updateBio, updateBanner, updateListPrivacy, updateCustomPhoto, assignTagToUser, isAdmin, searchUsers } = useAuth();
   const { lang, setLang } = useTitleLang();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'overview' | 'history' | 'watchlist' | 'mal' | 'settings'>('overview');
@@ -2398,7 +2461,21 @@ const ProfilePage = () => {
             : watchlist.filter(a => ((a as any)._watchStatus ?? '') === watchStatusFilter);
 
           return (
-            <div>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-gray-300 uppercase tracking-wider">Manage Watchlist</h3>
+                {watchlist.length > 0 && (
+                  <button
+                    onClick={() => {
+                      if (confirm('Remove all items from your watchlist?')) clearWatchlist();
+                    }}
+                    className="text-xs font-bold text-red-300 hover:text-red-200 bg-red-500/10 border border-red-500/30 px-3 py-1 rounded-lg transition"
+                  >
+                    Clear All
+                  </button>
+                )}
+              </div>
+
               {/* Status filter tabs */}
               <div className="flex gap-2 mb-5 overflow-x-auto no-scrollbar pb-1">
                 {STATUS_FILTERS.map(f => {
