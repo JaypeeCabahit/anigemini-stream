@@ -67,6 +67,22 @@ const normalizeAnime = (raw: any): Anime => {
     HIATUS: 'On Hiatus',
   };
 
+  let mappedStatus = statusMap[raw?.status] || raw?.status || '';
+
+  // Heuristic: if AniList says "Not yet aired" but the start date is already in the past,
+  // the show is likely airing (data lag on AniList side).
+  if (mappedStatus === 'Not yet aired' && startDate?.year) {
+    const today = new Date();
+    const airDate = new Date(
+      startDate.year,
+      (startDate.month ?? 1) - 1,
+      startDate.day ?? 1
+    );
+    if (airDate <= today) {
+      mappedStatus = 'Currently Airing';
+    }
+  }
+
   return {
     mal_id: String(raw?.id ?? raw?.idMal ?? ''),
     title,
@@ -93,7 +109,7 @@ const normalizeAnime = (raw: any): Anime => {
       ? { from: airedFrom, to: '', string: airedFrom }
       : undefined,
     episodes: raw?.episodes ?? 0,
-    status: statusMap[raw?.status] || raw?.status || '',
+    status: mappedStatus,
     genres,
     rating: raw?.isAdult ? 'R+ - Mild Nudity' : '',
     type: raw?.format || 'TV',

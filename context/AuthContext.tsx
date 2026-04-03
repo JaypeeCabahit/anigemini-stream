@@ -64,6 +64,7 @@ interface AuthState {
   userProfile: UserProfile;
   isAdmin: boolean;
   onlineUsers: { members: number; guests: number };
+  onlineUserIds: string[];
   login: () => Promise<void>;
   logout: () => Promise<void>;
   addToWatchlist: (anime: Anime) => Promise<void>;
@@ -96,6 +97,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [userProfile, setUserProfile] = useState<UserProfile>(DEFAULT_PROFILE);
   const [loading, setLoading] = useState(true);
   const [onlineUsers, setOnlineUsers] = useState<{ members: number; guests: number }>({ members: 0, guests: 0 });
+  const [onlineUserIds, setOnlineUserIds] = useState<string[]>([]);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (firebaseUser) => {
@@ -195,39 +197,47 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   // ─── Online presence tracking ────────────────────────────────────────────────
   useEffect(() => {
-    // Skip presence tracking for guests to avoid permission errors on locked-down DB rules
-    if (!user) {
-      setOnlineUsers({ members: 0, guests: 0 });
-      return;
+    let presenceRef: any = null;
+    let unsubConnected: (() => void) | null = null;
+
+    if (user) {
+      // Authenticated: register as a named member presence
+      const presenceId = `member_${user.uid}`;
+      presenceRef = ref(db, `presence/${presenceId}`);
+
+      const connectedRef = ref(db, '.info/connected');
+      unsubConnected = onValue(connectedRef, snap => {
+        if (snap.val() === true) {
+          set(presenceRef, { isGuest: false, updatedAt: Date.now() }).catch(() => {});
+          onDisconnect(presenceRef).remove().catch(() => {});
+        }
+      });
     }
 
-    const presenceId = `member_${user.uid}`;
-    const presenceRef = ref(db, `presence/${presenceId}`);
-
-    // Track connection and register disconnect handler
-    const connectedRef = ref(db, '.info/connected');
-    const unsubConnected = onValue(connectedRef, snap => {
-      if (snap.val() === true) {
-        set(presenceRef, { isGuest: false, updatedAt: Date.now() }).catch(() => {});
-        onDisconnect(presenceRef).remove().catch(() => {});
-      }
-    });
-
-    // Listen to total presence list for online counts
+    // Always listen to presence list so even guests see who's online
     const presenceListRef = ref(db, 'presence');
     const unsubPresence = onValue(presenceListRef, snap => {
-      if (!snap.exists()) { setOnlineUsers({ members: 0, guests: 0 }); return; }
+      if (!snap.exists()) { setOnlineUsers({ members: 0, guests: 0 }); setOnlineUserIds([]); return; }
       let members = 0; let guests = 0;
-      Object.values(snap.val() as Record<string, any>).forEach((entry: any) => {
-        if (entry.isGuest) guests++; else members++;
+      const ids: string[] = [];
+      Object.entries(snap.val() as Record<string, any>).forEach(([key, entry]: [string, any]) => {
+        if (entry.isGuest) {
+          guests++;
+        } else {
+          members++;
+          // presenceId format: "member_<uid>"
+          const uid = key.startsWith('member_') ? key.slice(7) : null;
+          if (uid) ids.push(uid);
+        }
       });
       setOnlineUsers({ members, guests });
+      setOnlineUserIds(ids);
     });
 
     return () => {
-      unsubConnected();
+      if (unsubConnected) unsubConnected();
       unsubPresence();
-      remove(presenceRef);
+      if (presenceRef) remove(presenceRef).catch(() => {});
     };
   }, [user]);
 
@@ -363,6 +373,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       userProfile,
       isAdmin: user?.uid === ADMIN_UID,
       onlineUsers,
+      onlineUserIds,
       login,
       logout,
       addToWatchlist,

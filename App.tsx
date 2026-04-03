@@ -969,11 +969,15 @@ const HomePage = () => {
     </div>
   );
 
-  // Daily = top trending, Weekly = seasonal (currently airing), Monthly = all-time popular
+  // Daily = trending, Weekly = popular this season, Monthly = top currently airing (deduplicated)
+  const monthlyAiring = [...seasonalAnime, ...topAnime]
+    .filter((a, i, arr) => arr.findIndex(x => x.mal_id === a.mal_id) === i)
+    .filter(a => a.status?.includes('Airing'));
+
   const sidebarList =
     sidebarTab === 'daily' ? topAnime :
       sidebarTab === 'weekly' ? seasonalAnime :
-        popularAnime;
+        monthlyAiring.length > 0 ? monthlyAiring : seasonalAnime;
 
   // Just Completed = finished anime from top list
   const completedAnime = topAnime.filter(a =>
@@ -1332,7 +1336,7 @@ const WatchPage = () => {
         </Link>
 
         <div className="grid gap-6 xl:grid-cols-12">
-          <div className="order-2 xl:order-1 xl:col-span-3">
+          <div className="order-2 xl:order-1 xl:col-span-3 2xl:col-span-2">
             <div className="bg-[#1f2026] rounded-2xl border border-white/5 p-4 h-full flex flex-col">
               <div className="flex items-center justify-between text-sm text-gray-300">
                 <h3 className="font-bold text-white">Episodes ({episodes.length})</h3>
@@ -1388,7 +1392,7 @@ const WatchPage = () => {
             </div>
           </div>
 
-          <div className="order-1 xl:order-2 xl:col-span-6">
+          <div className="order-1 xl:order-2 xl:col-span-6 2xl:col-span-8">
             <div className="aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl relative bg-[#151619] border border-white/5">
               {loadingSource && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-20">
@@ -1437,7 +1441,7 @@ const WatchPage = () => {
             </div>
           </div>
 
-          <div className="order-3 xl:order-3 xl:col-span-3">
+          <div className="order-3 xl:order-3 xl:col-span-3 2xl:col-span-2">
             <div className="bg-[#1f2026] rounded-2xl border border-white/5 p-4 flex flex-col gap-4">
               <div className="rounded-xl overflow-hidden border border-white/5">
                 <img src={anime?.images.webp.large_image_url} alt={anime?.title} className="w-full h-64 object-cover object-top" />
@@ -2470,7 +2474,7 @@ const AboutPage = () => (
 );
 
 const CommunityPage = () => {
-  const { searchUsers, onlineUsers } = useAuth();
+  const { searchUsers, onlineUsers, onlineUserIds, user, getUserPublicProfile } = useAuth();
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<import('./context/AuthContext').PublicUser[]>([]);
@@ -2478,9 +2482,18 @@ const CommunityPage = () => {
   const searchTimer = useRef<any>(null);
 
   useEffect(() => {
-    // Load discover users on mount
-    searchUsers('').then(r => { setResults(r); setLoading(false); });
-  }, []);
+    const loadUsers = async () => {
+      const r = await searchUsers('');
+      // Ensure the current logged-in user appears in the list
+      if (user && !r.find(u => u.uid === user.uid)) {
+        const selfProfile = await getUserPublicProfile(user.uid);
+        if (selfProfile) r.unshift(selfProfile);
+      }
+      setResults(r);
+      setLoading(false);
+    };
+    loadUsers();
+  }, [user]);
 
   const handleSearch = (val: string) => {
     setQuery(val);
@@ -2488,6 +2501,15 @@ const CommunityPage = () => {
     searchTimer.current = setTimeout(async () => {
       setLoading(true);
       const r = await searchUsers(val);
+      // Ensure self appears even in search results
+      if (user && !r.find(u => u.uid === user.uid)) {
+        const selfProfile = await getUserPublicProfile(user.uid);
+        if (selfProfile) {
+          const matchesQuery = !val.trim() ||
+            selfProfile.displayName.toLowerCase().includes(val.toLowerCase());
+          if (matchesQuery) r.unshift(selfProfile);
+        }
+      }
       setResults(r);
       setLoading(false);
     }, 350);
@@ -2539,22 +2561,35 @@ const CommunityPage = () => {
           : results.length === 0
             ? <p className="text-gray-500 text-sm text-center py-12">No users found.</p>
             : <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-              {results.map(u => (
-                <button key={u.uid} onClick={() => navigate(`/user/${u.uid}`)}
-                  className="bg-[#1a1b1f] hover:bg-[#22232a] border border-white/5 hover:border-brand-500/40 rounded-xl p-4 text-center transition group">
-                  <img src={u.photoURL ?? `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(u.displayName)}`}
-                    alt={u.displayName} className="w-16 h-16 rounded-full object-cover mx-auto mb-3 border-2 border-white/10 group-hover:border-brand-500/50 transition" />
-                  <p className="text-sm font-bold text-white truncate">{u.displayName}</p>
-                  {u.profile?.customTag
-                    ? <span className="text-xs text-brand-400 font-medium">{u.profile.customTag}</span>
-                    : <span className="text-xs text-gray-600">Member</span>}
-                  <div className="flex justify-center gap-3 mt-2 text-xs text-gray-500">
-                    <span>{u.historyCount} watched</span>
-                    <span>·</span>
-                    <span>{u.watchlistCount} saved</span>
-                  </div>
-                </button>
-              ))}
+              {results.map(u => {
+                const isOnline = onlineUserIds.includes(u.uid);
+                const isSelf = user?.uid === u.uid;
+                return (
+                  <button key={u.uid} onClick={() => navigate(`/user/${u.uid}`)}
+                    className={`bg-[#1a1b1f] hover:bg-[#22232a] border rounded-xl p-4 text-center transition group relative ${isSelf ? 'border-brand-500/40' : 'border-white/5 hover:border-brand-500/40'}`}>
+                    {/* Online indicator */}
+                    <div className="relative w-16 mx-auto mb-3">
+                      <img src={u.photoURL ?? `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(u.displayName)}`}
+                        alt={u.displayName} className="w-16 h-16 rounded-full object-cover border-2 border-white/10 group-hover:border-brand-500/50 transition" />
+                      {isOnline && (
+                        <span className="absolute bottom-0.5 right-0.5 w-3.5 h-3.5 bg-green-400 border-2 border-[#1a1b1f] rounded-full" />
+                      )}
+                    </div>
+                    <div className="flex items-center justify-center gap-1.5 mb-0.5">
+                      <p className="text-sm font-bold text-white truncate">{u.displayName}</p>
+                      {isSelf && <span className="text-[10px] bg-brand-500/20 text-brand-400 border border-brand-500/30 px-1.5 py-0.5 rounded-full font-bold flex-shrink-0">You</span>}
+                    </div>
+                    {u.profile?.customTag
+                      ? <span className="text-xs text-brand-400 font-medium">{u.profile.customTag}</span>
+                      : <span className="text-xs text-gray-600">{isOnline ? <span className="text-green-400">Online</span> : 'Member'}</span>}
+                    <div className="flex justify-center gap-3 mt-2 text-xs text-gray-500">
+                      <span>{u.historyCount} watched</span>
+                      <span>·</span>
+                      <span>{u.watchlistCount} saved</span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>}
       </div>
     </div>
