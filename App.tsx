@@ -193,6 +193,27 @@ export const getDisplayTitle = (anime: Anime, lang: TitleLang): string => {
   return t.english || t.romaji || anime.title;
 };
 
+// ─── App-wide Settings (localStorage) ───────────────────────────────────────
+interface AppSettings {
+  autoPlay: boolean;
+  autoNext: boolean;
+  skipSeconds: number;
+  autoSkipIntro: boolean;
+}
+const DEFAULT_SETTINGS: AppSettings = { autoPlay: true, autoNext: true, skipSeconds: 10, autoSkipIntro: false };
+const getSettings = (): AppSettings => {
+  try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem('aniweb-settings') || '{}') }; }
+  catch { return DEFAULT_SETTINGS; }
+};
+const saveSettings = (s: AppSettings) => localStorage.setItem('aniweb-settings', JSON.stringify(s));
+const useSettings = () => {
+  const [settings, setSettings] = useState<AppSettings>(getSettings);
+  const updateSetting = <K extends keyof AppSettings>(key: K, val: AppSettings[K]) => {
+    setSettings(prev => { const next = { ...prev, [key]: val }; saveSettings(next); return next; });
+  };
+  return { settings, updateSetting };
+};
+
 const NavBar = () => {
   const { user, login, logout, isAuthenticated, userProfile } = useAuth();
   const { lang, setLang } = useTitleLang();
@@ -662,13 +683,15 @@ const Hero = ({ animeList }: { animeList: Anime[] }) => {
   );
 };
 
-const VideoPlayer = ({ src, poster, headers, isEmbed = false, startAt = 0, onProgress }: {
+const VideoPlayer = ({ src, poster, headers, isEmbed = false, startAt = 0, onProgress, onEnded, skipSeconds = 10 }: {
   src: string;
   poster?: string;
   headers?: Record<string, string>;
   isEmbed?: boolean;
   startAt?: number;
   onProgress?: (currentTime: number, duration: number) => void;
+  onEnded?: () => void;
+  skipSeconds?: number;
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isReady, setIsReady] = useState(false);
@@ -681,6 +704,22 @@ const VideoPlayer = ({ src, poster, headers, isEmbed = false, startAt = 0, onPro
     if (!v) return;
     if (v.paused) { v.play(); } else { v.pause(); }
   };
+
+  // Keyboard shortcuts: Space=play/pause, J/←=rewind, L/→=forward
+  useEffect(() => {
+    if (isEmbed) return;
+    const handleKey = (e: KeyboardEvent) => {
+      const v = videoRef.current;
+      if (!v) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); v.paused ? v.play() : v.pause(); }
+      else if (e.key === 'j' || e.key === 'J' || e.key === 'ArrowLeft') { e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - skipSeconds); }
+      else if (e.key === 'l' || e.key === 'L' || e.key === 'ArrowRight') { e.preventDefault(); v.currentTime = Math.min(v.duration || 0, v.currentTime + skipSeconds); }
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [isEmbed, skipSeconds]);
 
   useEffect(() => {
     if (isEmbed) return;
@@ -800,6 +839,7 @@ const VideoPlayer = ({ src, poster, headers, isEmbed = false, startAt = 0, onPro
           const v = videoRef.current;
           if (v && onProgress && v.duration > 0) onProgress(v.currentTime, v.duration);
         }}
+        onEnded={onEnded}
       />
 
       {/* Mobile helper controls (outside native UI) */}
@@ -1270,6 +1310,7 @@ const AnimeDetailsPage = () => {
 const WatchPage = () => {
   const { id } = useParams<{ id: string }>();
   const { saveWatchHistory, saveProgress, getProgress, addToWatchlist, removeFromWatchlist, watchlist, watchHistory, user, login } = useAuth();
+  const { settings } = useSettings();
   const [anime, setAnime] = useState<Anime | null>(null);
   const isInWatchlist = anime ? watchlist.some(a => a.mal_id === String(anime.mal_id)) : false;
   const [resumeTime, setResumeTime] = useState(0);
@@ -1478,12 +1519,20 @@ const WatchPage = () => {
                   headers={streamSource.headers}
                   isEmbed={streamSource.isEmbed}
                   startAt={resumeTime}
+                  skipSeconds={settings.skipSeconds}
                   onProgress={(currentTime, duration) => {
                     if (!currentEpisode || !id) return;
                     if (progressSaveTimer.current) clearTimeout(progressSaveTimer.current);
                     progressSaveTimer.current = setTimeout(() => {
                       saveProgress(id, currentEpisode.id, currentTime, duration, currentEpisode.number);
                     }, 5000); // save after 5s of no seeking
+                  }}
+                  onEnded={() => {
+                    if (!settings.autoNext || !currentEpisode) return;
+                    const idx = episodes.findIndex(ep => ep.id === currentEpisode.id);
+                    if (idx >= 0 && idx < episodes.length - 1) {
+                      handleEpisodeSelect(episodes[idx + 1]);
+                    }
                   }}
                 />
               ) : (
@@ -1725,9 +1774,10 @@ const groupByDate = (entries: import('./context/AuthContext').WatchHistoryEntry[
 };
 
 const ProfilePage = () => {
-  const { user, watchlist, watchHistory, removeFromWatchlist, logout, userProfile, updateBio, updateBanner, updateListPrivacy, updateCustomPhoto, uploadProfilePhoto, assignTagToUser, isAdmin, searchUsers } = useAuth();
+  const { user, watchlist, watchHistory, removeFromWatchlist, logout, addToWatchlist, userProfile, updateBio, updateBanner, updateListPrivacy, updateCustomPhoto, uploadProfilePhoto, assignTagToUser, isAdmin, searchUsers } = useAuth();
+  const { lang, setLang } = useTitleLang();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'overview' | 'history' | 'watchlist'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'history' | 'watchlist' | 'mal' | 'settings'>('overview');
   const [editingBio, setEditingBio] = useState(false);
   const [bioInput, setBioInput] = useState('');
   const [showBannerPicker, setShowBannerPicker] = useState(false);
@@ -1740,6 +1790,13 @@ const ProfilePage = () => {
   const [tagTarget, setTagTarget] = useState<import('./context/AuthContext').PublicUser | null>(null);
   const [tagInput, setTagInput] = useState('');
   const [adminSearching, setAdminSearching] = useState(false);
+  // MAL import
+  const [malUsername, setMalUsername] = useState('');
+  const [malMode, setMalMode] = useState<'merge' | 'replace'>('merge');
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ success: boolean; count?: number; total?: number; error?: string } | null>(null);
+  // Settings
+  const { settings, updateSetting } = useSettings();
 
   if (!user) return (
     <div className="min-h-screen bg-[#202125] flex flex-col items-center justify-center gap-4 text-white">
@@ -1778,6 +1835,57 @@ const ProfilePage = () => {
       setPhotoUrlInput('');
     } finally {
       setSavingPhoto(false);
+    }
+  };
+
+  const handleMALImport = async () => {
+    if (!malUsername.trim()) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const url = `https://api.jikan.moe/v4/users/${encodeURIComponent(malUsername.trim())}/animelist?limit=300`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(res.status === 404 ? 'MAL user not found' : `Error ${res.status}`);
+      const data = await res.json();
+      const entries: any[] = Array.isArray(data?.data) ? data.data : [];
+
+      const DEFAULT_POSTER = 'https://placehold.co/600x900?text=No+Image';
+      const toAdd: Anime[] = entries
+        .map((item: any) => {
+          const entry = item?.entry ?? item;
+          if (!entry?.mal_id) return null;
+          const img = entry.images?.jpg?.large_image_url || entry.images?.jpg?.image_url || entry.images?.webp?.image_url || DEFAULT_POSTER;
+          return {
+            mal_id: String(entry.mal_id),
+            title: entry.title || 'Unknown',
+            images: { jpg: { image_url: img, large_image_url: img }, webp: { image_url: img, large_image_url: img } },
+            trailer: { youtube_id: '', url: '', embed_url: '', images: { image_url: img, small_image_url: img, medium_image_url: img, large_image_url: img, maximum_image_url: img } },
+            synopsis: entry.synopsis || '',
+            score: entry.score ?? null,
+            year: entry.year ?? null,
+            episodes: entry.episodes ?? 0,
+            status: entry.status || '',
+            genres: Array.isArray(entry.genres) ? entry.genres : [],
+            rating: entry.rating || '',
+            type: entry.type || 'TV',
+            duration: '',
+            rank: undefined,
+          } as Anime;
+        })
+        .filter(Boolean) as Anime[];
+
+      if (malMode === 'replace') {
+        await Promise.all(watchlist.map(a => removeFromWatchlist(a.mal_id)));
+      }
+
+      const existingIds = new Set(watchlist.map(a => a.mal_id));
+      const newEntries = malMode === 'merge' ? toAdd.filter(a => !existingIds.has(a.mal_id)) : toAdd;
+      await Promise.all(newEntries.map(a => addToWatchlist(a)));
+      setImportResult({ success: true, count: newEntries.length, total: toAdd.length });
+    } catch (err: any) {
+      setImportResult({ success: false, error: err.message || 'Import failed' });
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -1901,11 +2009,17 @@ const ProfilePage = () => {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 mb-6 bg-[#1a1b1f] p-1 rounded-xl w-fit border border-white/5">
-          {(['overview', 'history', 'watchlist'] as const).map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              className={`px-5 py-2 rounded-lg text-sm font-semibold capitalize transition ${activeTab === tab ? 'bg-brand-500 text-white shadow' : 'text-gray-400 hover:text-white'}`}>
-              {tab === 'watchlist' ? `Watchlist (${watchlist.length})` : tab.charAt(0).toUpperCase() + tab.slice(1)}
+        <div className="flex gap-1 mb-6 bg-[#1a1b1f] p-1 rounded-xl flex-wrap border border-white/5">
+          {([
+            { key: 'overview', label: 'Overview' },
+            { key: 'history', label: 'History' },
+            { key: 'watchlist', label: `Watchlist (${watchlist.length})` },
+            { key: 'mal', label: 'MAL Import' },
+            { key: 'settings', label: 'Settings' },
+          ] as const).map(({ key, label }) => (
+            <button key={key} onClick={() => setActiveTab(key)}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${activeTab === key ? 'bg-brand-500 text-white shadow' : 'text-gray-400 hover:text-white'}`}>
+              {label}
             </button>
           ))}
         </div>
@@ -2006,6 +2120,109 @@ const ProfilePage = () => {
                 </div>
               ))}
             </div>
+        )}
+
+        {/* MAL Import tab */}
+        {activeTab === 'mal' && (
+          <div className="max-w-lg">
+            <h2 className="text-lg font-bold text-white mb-1">MyAnimeList Import</h2>
+            <p className="text-gray-400 text-sm mb-6">Import your MAL anime list by entering your MAL username. Your public list will be fetched via the Jikan API.</p>
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">MAL Username</label>
+                <input
+                  value={malUsername}
+                  onChange={e => setMalUsername(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleMALImport()}
+                  placeholder="e.g. Jaypee123"
+                  className="w-full bg-white/5 text-white text-sm px-4 py-2.5 rounded-xl border border-white/10 focus:outline-none focus:border-brand-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">Import Mode</label>
+                <div className="flex gap-2">
+                  {(['merge', 'replace'] as const).map(mode => (
+                    <button key={mode} onClick={() => setMalMode(mode)}
+                      className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition capitalize ${malMode === mode ? 'bg-brand-500 text-white border-brand-500' : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'}`}>
+                      {mode === 'merge' ? '🔀 Merge (keep existing)' : '♻️ Replace (clear & import)'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleMALImport} disabled={importing || !malUsername.trim()}
+                className="w-full bg-brand-500 hover:bg-brand-600 text-white font-bold py-3 rounded-xl transition disabled:opacity-50 flex items-center justify-center gap-2">
+                {importing ? <><div className="animate-spin rounded-full h-4 w-4 border-t-2 border-white" /> Importing...</> : '📥 Import from MAL'}
+              </button>
+              {importResult && (
+                <div className={`p-4 rounded-xl border text-sm ${importResult.success ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-red-500/10 border-red-500/30 text-red-400'}`}>
+                  {importResult.success
+                    ? `✅ Imported ${importResult.count} anime${importResult.total && importResult.total !== importResult.count ? ` (${importResult.total} total on MAL, ${importResult.total - importResult.count!} already in list)` : ''}`
+                    : `❌ ${importResult.error}`}
+                </div>
+              )}
+              <p className="text-xs text-gray-600">Note: Your MAL list must be set to Public for this to work. Up to 300 entries are imported per request.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Settings tab */}
+        {activeTab === 'settings' && (
+          <div className="max-w-lg space-y-6">
+            <h2 className="text-lg font-bold text-white mb-1">Settings</h2>
+
+            {/* Language */}
+            <div className="bg-[#1a1b1f] border border-white/5 rounded-xl p-4">
+              <h3 className="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">Anime Title Language</h3>
+              <div className="flex gap-2">
+                {(['english', 'romaji'] as const).map(l => (
+                  <button key={l} onClick={() => setLang(l)}
+                    className={`flex-1 py-2.5 rounded-lg text-sm font-bold border transition ${lang === l ? 'bg-brand-500 text-white border-brand-500' : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'}`}>
+                    {l === 'english' ? '🇺🇸 English' : '🇯🇵 Japanese (Romaji)'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Playback */}
+            <div className="bg-[#1a1b1f] border border-white/5 rounded-xl p-4 space-y-4">
+              <h3 className="text-sm font-bold text-gray-300 uppercase tracking-wider">Playback</h3>
+              {([
+                { key: 'autoPlay', label: 'Auto-Play', description: 'Automatically start playing when episode loads' },
+                { key: 'autoNext', label: 'Auto-Next Episode', description: 'Automatically play the next episode when current ends' },
+                { key: 'autoSkipIntro', label: 'Auto-Skip Intro', description: 'Skip opening sequences automatically (when detected)' },
+              ] as const).map(({ key, label, description }) => (
+                <div key={key} className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold text-white">{label}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{description}</p>
+                  </div>
+                  <button onClick={() => updateSetting(key, !settings[key])}
+                    className={`relative w-11 h-6 rounded-full transition flex-shrink-0 ${settings[key] ? 'bg-brand-500' : 'bg-white/10'}`}>
+                    <span className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all ${settings[key] ? 'left-6' : 'left-1'}`} />
+                  </button>
+                </div>
+              ))}
+
+              {/* Skip seconds */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <p className="text-sm font-semibold text-white">Skip Duration</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Seconds to skip with J / L keys (or ← →)</p>
+                  </div>
+                  <span className="text-brand-400 font-bold text-sm">{settings.skipSeconds}s</span>
+                </div>
+                <div className="flex gap-2">
+                  {[5, 10, 15, 30].map(s => (
+                    <button key={s} onClick={() => updateSetting('skipSeconds', s)}
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-bold border transition ${settings.skipSeconds === s ? 'bg-brand-500 text-white border-brand-500' : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'}`}>
+                      {s}s
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Admin section — tag assignment */}
@@ -2875,13 +3092,13 @@ const LandingPage = () => {
     <div className="min-h-screen bg-[#0e0f12] flex flex-col">
       {/* Hero */}
       <div className="relative flex-1 flex flex-col items-center justify-center text-center px-4 py-24 overflow-hidden">
-        {/* BG blobs */}
-        <div className="absolute top-1/4 left-1/4 w-[600px] h-[600px] bg-brand-500/10 rounded-full blur-[120px] pointer-events-none" />
-        <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-purple-500/10 rounded-full blur-[100px] pointer-events-none" />
+        {/* BG blobs — hidden on mobile to avoid GPU lag */}
+        <div className="hidden sm:block absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-brand-500/10 rounded-full blur-[100px] pointer-events-none" />
+        <div className="hidden sm:block absolute bottom-1/4 right-1/4 w-[350px] h-[350px] bg-purple-500/10 rounded-full blur-[80px] pointer-events-none" />
 
         <div className="relative z-10 max-w-3xl mx-auto">
           <div className="inline-flex items-center gap-2 bg-white/5 border border-white/10 rounded-full px-4 py-1.5 text-xs text-gray-400 mb-8">
-            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+            <span className="w-2 h-2 rounded-full bg-green-400 sm:animate-pulse" />
             Free · No Ads · Always Updated
           </div>
 
@@ -2895,13 +3112,13 @@ const LandingPage = () => {
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <button
               onClick={() => navigate('/home')}
-              className="btn-shimmer btn-shimmer-brand flex items-center gap-2 text-white font-bold px-8 py-4 rounded-full shadow-xl shadow-brand-500/40 text-sm w-full sm:w-auto justify-center hover:scale-105 transition-transform duration-200"
+              className="sm:btn-shimmer sm:btn-shimmer-brand bg-brand-500 sm:bg-transparent flex items-center gap-2 text-white font-bold px-8 py-4 rounded-full shadow-xl shadow-brand-500/40 text-sm w-full sm:w-auto justify-center active:scale-95 sm:hover:scale-105 transition-transform duration-200"
             >
               <PlayCircle className="w-5 h-5" /> Browse Anime
             </button>
             <button
               onClick={() => navigate('/manga')}
-              className="btn-shimmer btn-shimmer-purple flex items-center gap-2 text-white font-bold px-8 py-4 rounded-full shadow-xl shadow-purple-500/40 text-sm w-full sm:w-auto justify-center hover:scale-105 transition-transform duration-200"
+              className="sm:btn-shimmer sm:btn-shimmer-purple bg-purple-700 sm:bg-transparent flex items-center gap-2 text-white font-bold px-8 py-4 rounded-full shadow-xl shadow-purple-500/40 text-sm w-full sm:w-auto justify-center active:scale-95 sm:hover:scale-105 transition-transform duration-200"
             >
               <BookOpen className="w-5 h-5" /> Browse Manga
             </button>
@@ -2934,7 +3151,7 @@ const LandingPage = () => {
               <button key={a.mal_id} onClick={() => navigate(`/anime/${a.mal_id}`)}
                 className="group relative w-24 sm:w-28 flex-shrink-0">
                 <div className="aspect-[3/4] rounded-xl overflow-hidden border border-white/5 group-hover:border-brand-500/40 transition">
-                  <img src={a.images.jpg.image_url} alt={a.title} className="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
+                  <img src={a.images.jpg.image_url} alt={a.title} className="w-full h-full object-cover sm:group-hover:scale-105 sm:transition sm:duration-500" />
                 </div>
                 <p className="text-[10px] text-gray-400 mt-1.5 line-clamp-1 group-hover:text-white transition text-center">{a.title}</p>
               </button>
