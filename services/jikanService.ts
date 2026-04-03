@@ -131,6 +131,7 @@ const normalizeAnime = (raw: any): Anime => {
 };
 
 const normalizeScheduleAnime = (raw: any): Anime => {
+  const malId = raw?.idMal;
   const poster =
     raw?.coverImage?.extraLarge ||
     raw?.coverImage?.large ||
@@ -143,7 +144,8 @@ const normalizeScheduleAnime = (raw: any): Anime => {
     'Unknown Title';
 
   return {
-    mal_id: String(raw?.idMal ?? raw?.id ?? ''),
+    // Only keep MAL id; skip AniList-only ids to avoid broken detail routes
+    mal_id: malId ? String(malId) : '',
     title,
     images: {
       jpg: { image_url: poster, large_image_url: poster },
