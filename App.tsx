@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
 import useEmblaCarousel from 'embla-carousel-react';
 import Autoplay from 'embla-carousel-autoplay';
-import { HashRouter, Routes, Route, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { Search, Home, PlayCircle, Play, Pause, User, LogOut, Menu, X, Heart, Star, Plus, Info, Sparkles, LogIn, Lock, AlertCircle, ChevronRight, ChevronLeft, Calendar, Clock, Monitor, Mic, SkipForward, SkipBack, Lightbulb, Tv, Settings, MessageCircle, ChevronsRight, ChevronsLeft, Shuffle, Users, Edit3, Check, Globe, BookOpen } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import * as jikanService from './services/jikanService';
@@ -693,7 +693,7 @@ const AnimeCard = ({ anime, rank }: { anime: Anime; rank?: number }) => {
           style={{ animation: 'fadeInTooltip 0.15s ease-out' }}>
           <h4 className="text-sm font-black text-brand-400 mb-2 line-clamp-2 leading-snug">{title}</h4>
           <div className="flex flex-wrap gap-1.5 mb-3">
-            {anime.genres.slice(0, 3).map(g => (
+            {(anime.genres ?? []).slice(0, 3).map(g => (
               <span key={g.name} className="text-[10px] bg-white/5 border border-white/10 text-gray-300 px-2 py-0.5 rounded-full">{g.name}</span>
             ))}
           </div>
@@ -2017,31 +2017,14 @@ const ProfilePage = () => {
   // MAL import
   const [malFile, setMalFile] = useState<File | null>(null);
   const [malUsername, setMalUsername] = useState('');
-  const [malImportMode, setMalImportMode] = useState<'oauth' | 'username' | 'xml'>('oauth');
+  const [malImportMode, setMalImportMode] = useState<'username' | 'xml'>('username');
   const [malMode, setMalMode] = useState<'merge' | 'replace'>('merge');
-  const [malAccessToken, setMalAccessToken] = useState<string | null>(() => getStoredMALToken());
-  const [malProfileName, setMalProfileName] = useState<string | null>(() => localStorage.getItem(MAL_PROFILE_KEY));
-  const [malConnecting, setMalConnecting] = useState(false);
-  const [malAuthMessage, setMalAuthMessage] = useState<string | null>(() => localStorage.getItem(MAL_AUTH_ERROR_KEY));
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ success: boolean; count?: number; total?: number; error?: string } | null>(null);
   // Watchlist filter
   const [watchStatusFilter, setWatchStatusFilter] = useState<string>('all');
   // Settings
   const { settings, updateSetting } = useSettings();
-
-  useEffect(() => {
-    const syncMAL = () => {
-      setMalAccessToken(getStoredMALToken());
-      setMalProfileName(localStorage.getItem(MAL_PROFILE_KEY));
-      const err = localStorage.getItem(MAL_AUTH_ERROR_KEY);
-      setMalAuthMessage(err);
-      if (err) localStorage.removeItem(MAL_AUTH_ERROR_KEY);
-    };
-    syncMAL();
-    window.addEventListener('mal-auth-changed', syncMAL);
-    return () => window.removeEventListener('mal-auth-changed', syncMAL);
-  }, []);
 
   if (!user) return (
     <div className="min-h-screen bg-[#202125] flex flex-col items-center justify-center gap-4 text-white">
@@ -2095,90 +2078,6 @@ const ProfilePage = () => {
     const newEntries = malMode === 'merge' ? toAdd.filter(a => !existingIds.has(a.mal_id)) : toAdd;
     await Promise.all(newEntries.map(a => addToWatchlist(a, (a as any)._watchStatus)));
     setImportResult({ success: true, count: newEntries.length, total: toAdd.length });
-  };
-
-  const handleConnectMAL = async () => {
-    setImportResult(null);
-    setMalAuthMessage(null);
-    try {
-      setMalConnecting(true);
-      await beginMALAuth();
-    } catch (err: any) {
-      setMalAuthMessage(err?.message || 'Unable to start MAL login. Check env vars.');
-      setMalConnecting(false);
-    }
-  };
-
-  const handleDisconnectMAL = () => {
-    clearMALTokens();
-    localStorage.removeItem(MAL_AUTH_ERROR_KEY);
-    setMalAccessToken(null);
-    setMalProfileName(null);
-    setMalAuthMessage('Disconnected from MyAnimeList.');
-  };
-
-  const getValidMALToken = async () => {
-    let token = getStoredMALToken();
-    if (token) return token;
-    token = await refreshMALToken();
-    if (token) {
-      await fetchMALProfile(token).catch(() => {});
-      return token;
-    }
-    return null;
-  };
-
-  const handleMALImportOAuth = async () => {
-    setImporting(true);
-    setImportResult(null);
-    try {
-      let token = await getValidMALToken();
-      if (!token) throw new Error('Connect your MyAnimeList account first.');
-
-      const statusMap = MAL_STATUS_MAP;
-      const allItems: Anime[] = [];
-      let next = 'https://api.myanimelist.net/v2/users/@me/animelist?limit=1000&fields=list_status{status,score,num_episodes_watched},media_type,num_episodes,main_picture';
-
-      while (next) {
-        const res = await fetch(next, { headers: { Authorization: `Bearer ${token}` } });
-        if (res.status === 401) {
-          token = await refreshMALToken();
-          if (token) { await fetchMALProfile(token).catch(() => {}); continue; }
-          throw new Error('MAL session expired. Please reconnect.');
-        }
-        if (!res.ok) throw new Error(`MAL API error (${res.status}).`);
-        const json = await res.json();
-        const items: Anime[] = (json.data ?? []).map((entry: any) => {
-          const node = entry.node ?? {};
-          const ls = entry.list_status ?? {};
-          const pic = node.main_picture ?? {};
-          const image = pic.large || pic.medium || DEFAULT_POSTER;
-          return {
-            mal_id: String(node.id),
-            title: node.title,
-            images: { jpg: { image_url: image, large_image_url: image }, webp: { image_url: image, large_image_url: image } },
-            trailer: { youtube_id: '', url: '', embed_url: '', images: { image_url: image, small_image_url: image, medium_image_url: image, large_image_url: image, maximum_image_url: image } },
-            synopsis: '', score: ls.score ?? null, year: null,
-            episodes: node.num_episodes ?? 0, status: '', genres: [], rating: '',
-            type: node.media_type || 'TV', duration: '', rank: undefined,
-            _watchStatus: statusMap[ls.status as any] ?? 'Plan to Watch',
-          } as any;
-        });
-        allItems.push(...items);
-        next = json.paging?.next ?? null;
-        if (next) await new Promise(r => setTimeout(r, 250));
-      }
-
-      if (allItems.length === 0) throw new Error('No anime found on this MAL account.');
-      await applyImport(allItems);
-      setMalAccessToken(getStoredMALToken());
-      if (!malProfileName && token) await fetchMALProfile(token).catch(() => {});
-    } catch (err: any) {
-      setImportResult({ success: false, error: err.message || 'Import failed' });
-    } finally {
-      setImporting(false);
-      setMalConnecting(false);
-    }
   };
 
   const handleMALImportUsername = async () => {
@@ -2562,73 +2461,20 @@ const ProfilePage = () => {
           <div className="max-w-lg space-y-5">
             <div>
               <h2 className="text-lg font-bold text-white mb-1">MyAnimeList Import</h2>
-              <p className="text-gray-400 text-sm">Sync your MAL anime list via the official API (OAuth) or fallback XML export.</p>
+              <p className="text-gray-400 text-sm">Sync your MAL anime list by username or XML export.</p>
             </div>
 
             {/* Mode toggle */}
             <div className="flex bg-[#151619] rounded-xl overflow-hidden border border-white/5 p-1 gap-1">
-              {(['oauth', 'username', 'xml'] as const).map(m => (
+              {(['username', 'xml'] as const).map(m => (
                 <button key={m} onClick={() => { setMalImportMode(m); setImportResult(null); }}
                   className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition ${malImportMode === m ? 'bg-brand-500 text-white shadow' : 'text-gray-400 hover:text-white'}`}>
-                  {m === 'oauth' ? '🔑 MAL Account' : m === 'username' ? '👤 Username' : '📄 XML File'}
+                  {m === 'username' ? '👤 Username' : '📄 XML File'}
                 </button>
               ))}
             </div>
 
-            {malImportMode === 'oauth' ? (
-              <div className="space-y-4">
-                <div className="bg-[#1a1b1f] border border-white/5 rounded-xl p-4 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-white">Connection</p>
-                      <p className="text-xs text-gray-400">
-                        {malAccessToken ? (
-                          <>Connected{malProfileName ? ` as ${malProfileName}` : ''}</>
-                        ) : 'Not connected'}
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      {malAccessToken && (
-                        <button onClick={handleDisconnectMAL} className="text-xs text-gray-400 hover:text-white underline underline-offset-2">
-                          Disconnect
-                        </button>
-                      )}
-                      <button
-                        onClick={handleConnectMAL}
-                        disabled={malConnecting}
-                        className="bg-brand-500 hover:bg-brand-600 text-white text-xs font-bold px-3 py-2 rounded-lg transition disabled:opacity-60">
-                        {malConnecting ? 'Opening…' : malAccessToken ? 'Reconnect' : 'Connect MAL'}
-                      </button>
-                    </div>
-                  </div>
-                  <p className="text-xs text-gray-500">
-                    Uses MAL OAuth (PKCE). We never see your password. Redirect URI must match VITE_MAL_REDIRECT_URI.
-                  </p>
-                  {malAuthMessage && (
-                    <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/40 rounded-lg p-2">
-                      {malAuthMessage}
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">Import Mode</label>
-                  <div className="flex gap-2">
-                    {(['merge', 'replace'] as const).map(mode => (
-                      <button key={mode} onClick={() => setMalMode(mode)}
-                        className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition ${malMode === mode ? 'bg-brand-500 text-white border-brand-500' : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'}`}>
-                        {mode === 'merge' ? '🔀 Merge' : '♻️ Replace'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <button onClick={handleMALImportOAuth} disabled={importing || !malAccessToken}
-                  className="w-full bg-brand-500 hover:bg-brand-600 text-white font-bold py-3 rounded-xl transition disabled:opacity-50 flex items-center justify-center gap-2">
-                  {importing
-                    ? <><div className="animate-spin rounded-full h-4 w-4 border-t-2 border-white" /> Importing...</>
-                    : '📥 Import from MyAnimeList'}
-                </button>
-              </div>
-            ) : malImportMode === 'username' ? (
+            {malImportMode === 'username' ? (
               <div className="space-y-4">
                 <div>
                   <label className="text-xs text-gray-400 uppercase tracking-wider mb-1.5 block">MAL Username</label>
@@ -3803,7 +3649,7 @@ const AppInner = () => {
 
   return (
     <TitleLangContext.Provider value={{ lang, setLang }}>
-      <HashRouter>
+      <BrowserRouter>
         <MALCallbackHandler />
         <ScrollToTop />
         <div className="bg-[#202125] min-h-screen text-white font-sans selection:bg-brand-500 selection:text-white">
@@ -3825,7 +3671,7 @@ const AppInner = () => {
           </Routes>
           <BottomNav />
         </div>
-      </HashRouter>
+      </BrowserRouter>
     </TitleLangContext.Provider>
   );
 };
