@@ -1391,6 +1391,7 @@ const AnimeDetailsPage = () => {
   const [characters, setCharacters] = useState<jikanService.Character[]>([]);
   const [recommendations, setRecommendations] = useState<Anime[]>([]);
   const [loading, setLoading] = useState(true);
+  const [detailsError, setDetailsError] = useState<string>('');
   const { addToWatchlist, updateWatchStatus, watchlist, user, login } = useAuth();
   const watchlistEntry = id ? watchlist.find(a => a.mal_id === id) : undefined;
   const isInWatchlist = !!watchlistEntry;
@@ -1400,6 +1401,7 @@ const AnimeDetailsPage = () => {
   useEffect(() => {
     if (id) {
       setLoading(true);
+      setDetailsError('');
       Promise.all([
         jikanService.getAnimeDetails(id),
         jikanService.getAnimeCharacters(id),
@@ -1430,13 +1432,34 @@ const AnimeDetailsPage = () => {
               if (!seasonList.find(s => s.mal_id === r.mal_id)) seasonList.push(r);
             });
           setSeasonOptions(seasonList);
+        } else {
+          const fast = await jikanService.getAnimeFast(id);
+          if (fast) {
+            setAnime(fast.anime);
+          } else {
+            setDetailsError('Anime not found or unavailable right now.');
+          }
         }
+        setLoading(false);
+      }).catch(err => {
+        console.error(err);
+        setDetailsError('Failed to load anime details.');
         setLoading(false);
       });
     }
   }, [id]);
 
-  if (loading || !anime) return <DetailsSkeleton />;
+  if (loading) return <DetailsSkeleton />;
+  if (detailsError) return (
+    <div className="min-h-screen bg-[#202125] flex flex-col items-center justify-center text-center text-gray-300 px-4">
+      <p className="text-red-400 font-semibold mb-3">{detailsError}</p>
+      <div className="flex gap-3">
+        <Link to="/home" className="bg-brand-500 text-white px-4 py-2 rounded-lg font-bold">Go Home</Link>
+        <button onClick={() => window.history.back()} className="bg-white/10 text-white px-4 py-2 rounded-lg font-bold">Back</button>
+      </div>
+    </div>
+  );
+  if (!anime) return <DetailsSkeleton />;
 
   const year = anime.year || (anime.aired?.from ? new Date(anime.aired.from).getFullYear() : null);
 
