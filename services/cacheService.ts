@@ -178,8 +178,16 @@ export async function cachedFetch<T>(
   // Fetch fresh data
   const data = await fetcher();
 
-  // Cache it
-  cacheService.set(key, data, cacheType);
+  // Don't cache empty results — backend may have been temporarily unavailable
+  const isEmpty =
+    data === null ||
+    data === undefined ||
+    (Array.isArray(data) && data.length === 0) ||
+    (data && typeof data === 'object' && 'data' in (data as any) && Array.isArray((data as any).data) && (data as any).data.length === 0);
+
+  if (!isEmpty) {
+    cacheService.set(key, data, cacheType);
+  }
 
   return data;
 }
