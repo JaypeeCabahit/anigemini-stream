@@ -332,27 +332,51 @@ export const getAnimeDetailsJikan = async (malId: string): Promise<Anime | null>
   }
 };
 
+// In-flight dedup: prevents duplicate concurrent requests for the same anime
+const animeFastInFlight = new Map<string, Promise<AnimeFastResult | null>>();
+
 export const getAnimeFast = async (id: string): Promise<AnimeFastResult | null> => {
-  try {
-    const res = await fetch(`${API_BASE}/anime/${id}/fast`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data?.anime) return null;
+  // Return cached browser result if fresh (5 min TTL)
+  const cacheKey = `fast-${id}`;
+  const cached = await cachedFetch<AnimeFastResult | null>(
+    cacheKey,
+    async () => {
+      // Deduplicate concurrent calls for the same ID
+      const existing = animeFastInFlight.get(id);
+      if (existing) return existing;
 
-    const anime = normalizeAnime(data.anime);
-    const scraperSession: string | null = data.scraperSession ?? null;
-    const rawEps: any[] = Array.isArray(data.episodes) ? data.episodes : [];
-    const episodes = rawEps.map((ep: any) => ({
-      id: `${scraperSession}||${ep.session}`,
-      number: ep.episodeNumber || 0,
-      url: ep.url || '',
-    }));
+      const promise = (async () => {
+        try {
+          const res = await fetch(`${API_BASE}/anime/${id}/fast`);
+          if (!res.ok) return null;
+          const data = await res.json();
+          if (!data?.anime) return null;
 
-    return { anime, episodes, scraperSession };
-  } catch (err) {
-    console.error('AniList fast error:', err);
-    return null;
-  }
+          const anime = normalizeAnime(data.anime);
+          const scraperSession: string | null = data.scraperSession ?? null;
+          const rawEps: any[] = Array.isArray(data.episodes) ? data.episodes : [];
+          const episodes = rawEps.map((ep: any) => ({
+            id: `${scraperSession}||${ep.session}`,
+            number: ep.episodeNumber || 0,
+            url: ep.url || '',
+          }));
+
+          return { anime, episodes, scraperSession };
+        } catch (err) {
+          console.error('AniList fast error:', err);
+          return null;
+        } finally {
+          animeFastInFlight.delete(id);
+        }
+      })();
+
+      animeFastInFlight.set(id, promise);
+      return promise;
+    },
+    'stream' // 5-min TTL — matches backend Redis TTL
+  );
+
+  return cached ?? null;
 };
 
 export const getAnimeRelations = async (malId: string): Promise<AnimeRelation[]> => {

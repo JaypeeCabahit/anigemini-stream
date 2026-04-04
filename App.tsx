@@ -634,6 +634,10 @@ const AnimeCard = ({ anime, rank }: { anime: Anime; rank?: number }) => {
   const tooltipTimer = useRef<any>(null);
 
   const handleMouseEnter = () => {
+    // Prefetch watch page data on hover so the backend starts scraping early
+    if (anime.mal_id) {
+      jikanService.getAnimeFast(String(anime.mal_id)).catch(() => {});
+    }
     tooltipTimer.current = setTimeout(() => {
       if (cardRef.current) {
         const rect = cardRef.current.getBoundingClientRect();
