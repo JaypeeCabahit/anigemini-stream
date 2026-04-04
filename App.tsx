@@ -641,7 +641,7 @@ const AnimeCard = ({ anime, rank }: { anime: Anime; rank?: number }) => {
   const handleMouseEnter = () => {
     // Prefetch watch page data on hover so the backend starts scraping early
     if (anime.mal_id) {
-      jikanService.getAnimeFast(String(anime.mal_id)).catch(() => {});
+      jikanService.getAnimeFast(String(anime.mal_id)).catch(() => { });
     }
     tooltipTimer.current = setTimeout(() => {
       if (cardRef.current) {
@@ -1460,7 +1460,7 @@ const AnimeDetailsPage = () => {
                 if (details) return { ...opt, englishTitle: getDisplayTitle(details, 'EN') || undefined };
               } catch { /* ignore */ }
               return opt;
-            })).then(enriched => setSeasonOptions(enriched)).catch(() => {});
+            })).then(enriched => setSeasonOptions(enriched)).catch(() => { });
           }
         } else {
           const fast = await jikanService.getAnimeFast(id);
@@ -1655,24 +1655,46 @@ const WatchPage = () => {
   const [streamError, setStreamError] = useState('');
   const EPISODE_PAGE_SIZE = 50;
   const [episodePage, setEpisodePage] = useState(0);
-  const totalEpisodePages = Math.max(1, Math.ceil(episodes.length / EPISODE_PAGE_SIZE));
-  const pageStart = episodes.length ? episodePage * EPISODE_PAGE_SIZE + 1 : 0;
-  const pageEnd = episodes.length ? Math.min(episodes.length, episodePage * EPISODE_PAGE_SIZE + EPISODE_PAGE_SIZE) : 0;
-  const pagedEpisodes = episodes.slice(
+  const [episodeSearch, setEpisodeSearch] = useState('');
+  const [episodeSortDesc, setEpisodeSortDesc] = useState(false);
+
+  // Apply sort then search filter
+  const sortedEpisodes = useMemo(() => {
+    const sorted = [...episodes];
+    if (episodeSortDesc) sorted.reverse();
+    return sorted;
+  }, [episodes, episodeSortDesc]);
+
+  const filteredEpisodes = useMemo(() => {
+    const q = episodeSearch.trim();
+    if (!q) return sortedEpisodes;
+    return sortedEpisodes.filter(ep => String(ep.number).includes(q));
+  }, [sortedEpisodes, episodeSearch]);
+
+  const totalEpisodePages = Math.max(1, Math.ceil(filteredEpisodes.length / EPISODE_PAGE_SIZE));
+  const pageStart = filteredEpisodes.length ? episodePage * EPISODE_PAGE_SIZE + 1 : 0;
+  const pageEnd = filteredEpisodes.length ? Math.min(filteredEpisodes.length, episodePage * EPISODE_PAGE_SIZE + EPISODE_PAGE_SIZE) : 0;
+  const pagedEpisodes = filteredEpisodes.slice(
     episodePage * EPISODE_PAGE_SIZE,
     episodePage * EPISODE_PAGE_SIZE + EPISODE_PAGE_SIZE
   );
 
   useEffect(() => {
     setEpisodePage(0);
+    setEpisodeSearch('');
+    setEpisodeSortDesc(false);
   }, [id]);
+
+  useEffect(() => {
+    setEpisodePage(0);
+  }, [episodeSearch, episodeSortDesc]);
 
   useEffect(() => {
     const clamped = Math.max(0, totalEpisodePages - 1);
     if (episodePage > clamped) {
       setEpisodePage(clamped);
     }
-  }, [episodes, episodePage, totalEpisodePages]);
+  }, [filteredEpisodes, episodePage, totalEpisodePages]);
 
   useEffect(() => {
     const init = async () => {
@@ -1737,7 +1759,7 @@ const WatchPage = () => {
               }));
               setSeasonOptions(enriched);
             }
-          }).catch(() => {});
+          }).catch(() => { });
         }
       } catch (err) {
         console.error(err);
@@ -1865,7 +1887,33 @@ const WatchPage = () => {
                   </span>
                 )}
               </div>
-              <div className="mt-4 flex items-center justify-between text-xs text-gray-400 gap-2">
+
+              {/* Search + Sort controls */}
+              {episodes.length > 0 && (
+                <div className="mt-3 flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-500" />
+                    <input
+                      type="number"
+                      min="1"
+                      value={episodeSearch}
+                      onChange={e => setEpisodeSearch(e.target.value)}
+                      placeholder="Go to ep..."
+                      className="w-full bg-black/30 border border-white/10 rounded-md pl-7 pr-2 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-brand-500 transition [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                  </div>
+                  <button
+                    onClick={() => setEpisodeSortDesc(d => !d)}
+                    title={episodeSortDesc ? 'Highest → Lowest' : 'Lowest → Highest'}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-black/30 border border-white/10 hover:border-brand-500 text-xs text-gray-400 hover:text-white transition whitespace-nowrap"
+                  >
+                    {episodeSortDesc ? <ChevronLeft className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                    {episodeSortDesc ? 'High→Low' : 'Low→High'}
+                  </button>
+                </div>
+              )}
+
+              <div className="mt-3 flex items-center justify-between text-xs text-gray-400 gap-2">
                 <button
                   onClick={() => setEpisodePage(p => Math.max(0, p - 1))}
                   disabled={episodePage === 0}
@@ -1886,7 +1934,9 @@ const WatchPage = () => {
                 </button>
               </div>
               <div className="mt-3 text-[11px] text-gray-500">
-                Page {episodes.length ? episodePage + 1 : 0} / {episodes.length ? totalEpisodePages : 0}
+                {episodeSearch.trim()
+                  ? `${filteredEpisodes.length} result${filteredEpisodes.length !== 1 ? 's' : ''}`
+                  : `Page ${filteredEpisodes.length ? episodePage + 1 : 0} / ${filteredEpisodes.length ? totalEpisodePages : 0}`}
               </div>
               <div className="mt-4 flex-1 overflow-y-auto custom-scrollbar pr-1">
                 {episodes.length === 0 ? (
@@ -2785,7 +2835,7 @@ const ProfilePage = () => {
                     value={malUsername}
                     onChange={e => { setMalUsername(e.target.value); setImportResult(null); }}
                     onKeyDown={e => e.key === 'Enter' && handleMALImportUsername()}
-                    placeholder="e.g. freescript"
+                    placeholder="Your myanimelist username"
                     className="w-full bg-[#1a1b1f] border border-white/10 text-white text-sm px-4 py-3 rounded-xl focus:outline-none focus:border-brand-500/60 placeholder-gray-600"
                   />
                 </div>
