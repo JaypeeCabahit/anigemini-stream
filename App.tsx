@@ -121,8 +121,8 @@ type ThemeMode = 'light' | 'dark';
 
 // --- Shared Components ---
 
-const Badge = ({ children, color = 'bg-brand-500' }: { children: React.ReactNode, color?: string }) => (
-  <span className={`${color} text-white text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm`}>
+const Badge = ({ children, color = 'bg-brand-500 text-white' }: { children: React.ReactNode, color?: string }) => (
+  <span className={`${color} text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm`}>
     {children}
   </span>
 );
@@ -658,7 +658,7 @@ const AnimeCard = ({ anime, rank }: { anime: Anime; rank?: number }) => {
           )}
           <div className="absolute top-2 right-2 z-10 flex flex-col gap-1 items-end">
             <Badge color="bg-white/90 text-black">HD</Badge>
-            {anime.episodes && <Badge color="bg-brand-600">EP {anime.episodes}</Badge>}
+            {anime.episodes && <Badge color="bg-brand-600 text-white">EP {anime.episodes}</Badge>}
           </div>
           <LazyImage
             src={anime.images.webp.large_image_url}
