@@ -12,7 +12,7 @@ export interface Character {
   };
   role: string;
   voice_actors: {
-    person: { name: string };
+    person: { name: string; images?: { jpg?: { image_url?: string } } };
     language: string;
   }[];
 }
@@ -407,8 +407,24 @@ export const getAnimeRelations = async (malId: string): Promise<AnimeRelation[]>
   }
 };
 
-export const getAnimeCharacters = async (_id?: string): Promise<Character[]> => {
-  return [];
+export const getAnimeCharacters = async (malId: string): Promise<Character[]> => {
+  if (!malId) return [];
+  try {
+    return await cachedFetch(
+      `jikan-characters-${malId}`,
+      async () => {
+        const res = await fetch(`https://api.jikan.moe/v4/anime/${malId}/characters`);
+        if (!res.ok) return [];
+        const json = await res.json();
+        const list: Character[] = Array.isArray(json?.data) ? json.data : [];
+        // Only keep characters that have at least one Japanese VA
+        return list.filter(c => c.voice_actors?.some(v => v.language === 'Japanese')).slice(0, 18);
+      },
+      'anime'
+    );
+  } catch {
+    return [];
+  }
 };
 
 export const getAnimeRecommendations = async (id: string): Promise<Anime[]> => {

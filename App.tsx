@@ -1408,9 +1408,9 @@ const AnimeDetailsPage = () => {
       setDetailsError('');
       Promise.all([
         jikanService.getAnimeDetails(id),
-        jikanService.getAnimeCharacters(id),
         jikanService.getAnimeRecommendations(id),
-      ]).then(async ([animeData, charData, recData]) => {
+      ]).then(async ([animeData, recData]) => {
+        const charData: jikanService.Character[] = [];
         // If AniList reports "Not yet aired" but streaming episodes exist, fix the status
         if (animeData?.status === 'Not yet aired') {
           try {
@@ -1427,6 +1427,10 @@ const AnimeDetailsPage = () => {
         setAnime(animeData);
         setCharacters(charData);
         setRecommendations(recData);
+        // Fetch characters in background using MAL ID (Jikan requires it)
+        if (animeData?.mal_id) {
+          jikanService.getAnimeCharacters(String(animeData.mal_id)).then(chars => setCharacters(chars)).catch(() => {});
+        }
         let finalAnime = animeData;
         if (!finalAnime) {
           // Fallback to Jikan when AniList fails (common for schedule items)
@@ -1576,26 +1580,75 @@ const AnimeDetailsPage = () => {
             <h2 className="text-xl font-bold text-brand-100 mb-6 flex items-center gap-2">
               <User className="text-brand-500" /> Characters & Voice Actors
             </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-              {characters.map((char) => (
-                <div key={char.character.mal_id} className="bg-[#2a2c31] rounded-lg p-3 flex justify-between items-center border border-white/5">
-                  <div className="flex items-center gap-3">
-                    <img src={char.character.images.jpg.image_url} alt={char.character.name} className="w-12 h-12 rounded-full object-cover object-top" />
-                    <div>
-                      <p className="text-sm font-bold text-white">{char.character.name}</p>
-                      <p className="text-xs text-gray-400">{char.role}</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {characters.map((char) => {
+                const jaVA = char.voice_actors.find(v => v.language === 'Japanese');
+                return (
+                  <div key={char.character.mal_id} className="bg-[#2a2c31] rounded-lg overflow-hidden flex items-stretch border border-white/5">
+                    {/* Character side */}
+                    <img
+                      src={char.character.images.jpg.image_url}
+                      alt={char.character.name}
+                      className="w-14 h-full object-cover object-top flex-shrink-0"
+                      style={{ minHeight: 56 }}
+                    />
+                    <div className="flex flex-col justify-center px-3 py-2 flex-1 min-w-0">
+                      <p className="text-sm font-bold text-white truncate">{char.character.name}</p>
+                      <p className="text-xs text-gray-400 uppercase tracking-wide">{char.role}</p>
                     </div>
+                    {/* VA side */}
+                    {jaVA && (
+                      <>
+                        <div className="flex flex-col justify-center px-3 py-2 text-right flex-1 min-w-0">
+                          <p className="text-sm font-bold text-white truncate">{jaVA.person.name}</p>
+                          <p className="text-xs text-gray-400 uppercase tracking-wide">{jaVA.language}</p>
+                        </div>
+                        {jaVA.person.images?.jpg?.image_url && (
+                          <img
+                            src={jaVA.person.images.jpg.image_url}
+                            alt={jaVA.person.name}
+                            className="w-14 h-full object-cover object-top flex-shrink-0"
+                            style={{ minHeight: 56 }}
+                          />
+                        )}
+                      </>
+                    )}
                   </div>
-                  {char.voice_actors[0] && (
-                    <div className="flex items-center gap-3 text-right">
-                      <div>
-                        <p className="text-sm font-bold text-white">{char.voice_actors[0].person.name}</p>
-                        <p className="text-xs text-gray-400">{char.voice_actors[0].language}</p>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Trailers & PVs */}
+        {anime.trailer?.youtube_id && (
+          <div className="mt-12">
+            <h2 className="text-xl font-bold text-brand-100 mb-6 flex items-center gap-2">
+              <PlayCircle className="text-brand-500" /> Trailers &amp; PVs
+            </h2>
+            <div className="flex flex-wrap gap-4">
+              {(() => {
+                const vid = anime.trailer.youtube_id;
+                const thumb = `https://img.youtube.com/vi/${vid}/hqdefault.jpg`;
+                return (
+                  <a
+                    href={`https://www.youtube.com/watch?v=${vid}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group relative w-64 rounded-xl overflow-hidden border border-white/10 hover:border-brand-500/50 transition flex-shrink-0"
+                  >
+                    <img src={thumb} alt="Trailer" className="w-full aspect-video object-cover group-hover:opacity-80 transition" />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center group-hover:bg-brand-500/80 transition">
+                        <Play className="w-5 h-5 fill-white text-white ml-0.5" />
                       </div>
                     </div>
-                  )}
-                </div>
-              ))}
+                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-3 py-2">
+                      <p className="text-xs text-white font-semibold">Official Trailer</p>
+                    </div>
+                  </a>
+                );
+              })()}
             </div>
           </div>
         )}
