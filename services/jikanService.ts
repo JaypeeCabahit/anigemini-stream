@@ -99,9 +99,9 @@ const normalizeAnime = (raw: any): Anime => {
       webp: { image_url: poster, large_image_url: poster },
     },
     trailer: {
-      youtube_id: '',
-      url: '',
-      embed_url: '',
+      youtube_id: raw?.trailer?.site === 'youtube' ? (raw?.trailer?.id ?? '') : '',
+      url: raw?.trailer?.site === 'youtube' && raw?.trailer?.id ? `https://www.youtube.com/watch?v=${raw.trailer.id}` : '',
+      embed_url: raw?.trailer?.site === 'youtube' && raw?.trailer?.id ? `https://www.youtube.com/embed/${raw.trailer.id}` : '',
       images: {
         image_url: poster,
         small_image_url: poster,

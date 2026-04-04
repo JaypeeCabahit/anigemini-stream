@@ -3882,6 +3882,8 @@ const LandingPage = () => {
   const navigate = useNavigate();
   const [featured, setFeatured] = useState<Anime[]>([]);
   const [heroIndex, setHeroIndex] = useState(0);
+  // trailerVisible: true while the trailer iframe is showing (first 5s of each anime)
+  const [trailerVisible, setTrailerVisible] = useState(false);
 
   useEffect(() => {
     jikanService.getTopAnime().then(r => {
@@ -3891,14 +3893,31 @@ const LandingPage = () => {
     });
   }, []);
 
-  // Advance slide every 5 seconds
+  // Cycle: show trailer for 5s → show image for 4s → advance → repeat
   useEffect(() => {
     if (featured.length < 2) return;
-    const timer = setInterval(() => {
-      setHeroIndex(i => (i + 1) % featured.length);
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [featured.length]);
+    const currentHasTrailer = !!featured[heroIndex]?.trailer?.youtube_id;
+
+    // If this anime has a trailer, show it for 5s then fade to image for 4s then advance
+    // If no trailer, just show image for 5s then advance
+    const showDuration = currentHasTrailer ? 5000 : 5000;
+    const imagePause = currentHasTrailer ? 4000 : 0;
+
+    if (currentHasTrailer) setTrailerVisible(true);
+
+    const t1 = setTimeout(() => {
+      setTrailerVisible(false); // fade out trailer, image crossfade takes over
+      const t2 = setTimeout(() => {
+        setHeroIndex(i => (i + 1) % featured.length);
+      }, imagePause);
+      return () => clearTimeout(t2);
+    }, showDuration);
+
+    return () => clearTimeout(t1);
+  }, [heroIndex, featured]);
+
+  const currentAnime = featured[heroIndex];
+  const activeTrailerId = trailerVisible ? currentAnime?.trailer?.youtube_id : '';
 
   const getBg = (anime: Anime) =>
     anime?.trailer?.images?.large_image_url || anime?.images?.jpg?.large_image_url || '';
@@ -3907,7 +3926,8 @@ const LandingPage = () => {
     <div className="min-h-screen bg-[#0e0f12] flex flex-col">
       {/* Hero */}
       <div className="relative flex-1 flex flex-col items-center justify-center text-center px-4 py-24 overflow-hidden">
-        {/* Crossfade slideshow — all images stacked, CSS opacity transition handles fade */}
+
+        {/* Crossfade image slideshow (always underneath) */}
         {featured.map((anime, i) => {
           const bg = getBg(anime);
           if (!bg) return null;
@@ -3921,13 +3941,36 @@ const LandingPage = () => {
               style={{
                 filter: 'blur(3px)',
                 transform: 'scale(1.06)',
-                opacity: i === heroIndex ? 0.25 : 0,
+                opacity: i === heroIndex && !trailerVisible ? 0.25 : 0,
                 transition: 'opacity 1.5s ease-in-out',
               }}
             />
           );
         })}
-        <div className="absolute inset-0 bg-gradient-to-b from-[#0e0f12]/60 via-[#0e0f12]/40 to-[#0e0f12] pointer-events-none" />
+
+        {/* YouTube trailer — covers background when active */}
+        <div
+          className="absolute inset-0 pointer-events-none overflow-hidden"
+          style={{ opacity: activeTrailerId ? 1 : 0, transition: 'opacity 1.5s ease-in-out' }}
+        >
+          {activeTrailerId && (
+            <iframe
+              key={activeTrailerId}
+              src={`https://www.youtube.com/embed/${activeTrailerId}?autoplay=1&mute=1&controls=0&loop=1&playlist=${activeTrailerId}&rel=0&modestbranding=1&iv_load_policy=3&disablekb=1`}
+              allow="autoplay; encrypted-media"
+              className="absolute border-0"
+              style={{
+                // Scale iframe to cover viewport regardless of aspect ratio
+                top: '50%', left: '50%',
+                width: '100vw', height: '56.25vw',   // 16:9
+                minWidth: '177.78vh', minHeight: '100vh',
+                transform: 'translate(-50%, -50%)',
+              }}
+            />
+          )}
+        </div>
+
+        <div className="absolute inset-0 bg-gradient-to-b from-[#0e0f12]/70 via-[#0e0f12]/30 to-[#0e0f12] pointer-events-none" />
         {/* BG blobs — hidden on mobile to avoid GPU lag */}
         <div className="hidden sm:block absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-brand-500/10 rounded-full blur-[100px] pointer-events-none" />
         <div className="hidden sm:block absolute bottom-1/4 right-1/4 w-[350px] h-[350px] bg-purple-500/10 rounded-full blur-[80px] pointer-events-none" />
