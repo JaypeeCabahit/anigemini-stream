@@ -2,7 +2,7 @@
 import useEmblaCarousel from 'embla-carousel-react';
 import Autoplay from 'embla-carousel-autoplay';
 import { BrowserRouter, Routes, Route, Link, useNavigate, useParams, useLocation } from 'react-router-dom';
-import { Search, Home, PlayCircle, Play, Pause, User, LogOut, Menu, X, Heart, Star, Plus, Info, Sparkles, LogIn, Lock, AlertCircle, ChevronRight, ChevronLeft, Calendar, Clock, Monitor, Mic, SkipForward, SkipBack, Lightbulb, Tv, Settings, MessageCircle, ChevronsRight, ChevronsLeft, Shuffle, Users, Edit3, Check, Globe, BookOpen, Eye, EyeOff } from 'lucide-react';
+import { Search, Home, PlayCircle, Play, Pause, User, LogOut, Menu, X, Heart, Star, Plus, Info, Sparkles, LogIn, Lock, AlertCircle, ChevronRight, ChevronLeft, Calendar, Clock, Monitor, Mic, SkipForward, SkipBack, Lightbulb, Tv, Settings, MessageCircle, ChevronsRight, ChevronsLeft, Shuffle, Users, Edit3, Check, Globe, BookOpen, Eye, EyeOff, Bell } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import * as jikanService from './services/jikanService';
 import * as geminiService from './services/geminiService';
@@ -524,6 +524,11 @@ const NavBar = () => {
                 className={`hidden md:flex items-center justify-center w-9 h-9 rounded-lg transition border border-white/5 ${location.pathname === '/community' ? (isMangaMode ? 'bg-purple-600 text-white' : 'bg-brand-500 text-white') : 'bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white'}`}>
                 <Users className="w-4 h-4" />
               </Link>
+
+              {/* Notification bell (desktop) */}
+              <div className="hidden md:block">
+                <NotificationBell />
+              </div>
 
               {/* Title language toggle */}
               <button onClick={cycleLang} title="Toggle title language"
@@ -3937,6 +3942,12 @@ const BottomNav = () => {
           <Users className="w-5 h-5" />
           <span className="text-[10px] font-medium">Community</span>
         </button>
+        {isAuthenticated && (
+          <div className="flex flex-col items-center gap-1">
+            <NotificationBell upward />
+            <span className="text-[10px] font-medium text-gray-400">Alerts</span>
+          </div>
+        )}
         {isAuthenticated ? (
           <button onClick={() => go('/profile')} className="flex flex-col items-center gap-1 text-gray-400 hover:text-brand-500">
             <User className="w-5 h-5" />
@@ -3952,6 +3963,153 @@ const BottomNav = () => {
     </div>
   );
 }
+
+// --- Notification Bell ---
+const NotificationBell = ({ upward = false }: { upward?: boolean }) => {
+  const { watchlist, watchHistory, user } = useAuth();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [readIds, setReadIds] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set();
+    try {
+      const uid = localStorage.getItem('aniweb_notif_uid');
+      if (!uid) return new Set();
+      const stored = localStorage.getItem(`aniweb_notifs_read_${uid}`);
+      return new Set(stored ? JSON.parse(stored) : []);
+    } catch { return new Set(); }
+  });
+  const [episodeCounts, setEpisodeCounts] = useState<Record<string, number>>({});
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Keep uid cached in localStorage so readIds survive page loads
+  useEffect(() => {
+    if (user?.uid) localStorage.setItem('aniweb_notif_uid', user.uid);
+  }, [user?.uid]);
+
+  // Reload readIds when user changes
+  useEffect(() => {
+    if (!user) { setReadIds(new Set()); return; }
+    try {
+      const stored = localStorage.getItem(`aniweb_notifs_read_${user.uid}`);
+      setReadIds(new Set(stored ? JSON.parse(stored) : []));
+    } catch { setReadIds(new Set()); }
+  }, [user?.uid]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  // Fetch episode counts for airing watchlist anime (uses localStorage cache from getAnimeFast)
+  useEffect(() => {
+    if (!watchlist.length) return;
+    watchlist
+      .filter(a => a.status === 'Currently Airing')
+      .slice(0, 20)
+      .forEach(async (anime) => {
+        try {
+          const result = await jikanService.getAnimeFast(String(anime.mal_id));
+          if (result && result.episodes.length > 0) {
+            setEpisodeCounts(prev => ({ ...prev, [String(anime.mal_id)]: result.episodes.length }));
+          }
+        } catch { /* ignore */ }
+      });
+  }, [watchlist]);
+
+  const notifications = useMemo(() => {
+    const result: { id: string; animeId: string; title: string; image: string; availableEp: number; watchedEp: number }[] = [];
+    for (const anime of watchlist.slice(0, 20)) {
+      if (anime.status !== 'Currently Airing') continue;
+      const animeId = String(anime.mal_id);
+      const availableEp = episodeCounts[animeId] ?? 0;
+      if (availableEp <= 0) continue;
+      const watchedEp = watchHistory
+        .filter(h => h.animeId === animeId)
+        .reduce((max, h) => Math.max(max, h.episodeNumber || 0), 0);
+      if (availableEp > watchedEp) {
+        result.push({ id: `${animeId}-ep${availableEp}`, animeId, title: anime.title, image: anime.images.webp.large_image_url || anime.images.jpg.image_url, availableEp, watchedEp });
+      }
+    }
+    return result;
+  }, [watchlist, watchHistory, episodeCounts]);
+
+  const unreadCount = notifications.filter(n => !readIds.has(n.id)).length;
+
+  const markRead = (id: string) => {
+    if (!user) return;
+    const updated = new Set([...readIds, id]);
+    setReadIds(updated);
+    localStorage.setItem(`aniweb_notifs_read_${user.uid}`, JSON.stringify([...updated]));
+  };
+
+  const markAllRead = () => {
+    if (!user) return;
+    const updated = new Set([...readIds, ...notifications.map(n => n.id)]);
+    setReadIds(updated);
+    localStorage.setItem(`aniweb_notifs_read_${user.uid}`, JSON.stringify([...updated]));
+  };
+
+  if (!user) return null;
+
+  return (
+    <div ref={dropdownRef} className="relative">
+      <button onClick={() => setOpen(o => !o)} title="Notifications"
+        className="relative flex items-center justify-center w-9 h-9 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition border border-white/5">
+        <Bell className="w-4 h-4" />
+        {unreadCount > 0 && (
+          <span className="absolute -top-1 -right-1 w-4 h-4 bg-brand-500 text-white text-[10px] font-black rounded-full flex items-center justify-center leading-none">
+            {unreadCount > 9 ? '9+' : unreadCount}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className={`absolute right-0 w-80 max-w-[calc(100vw-2rem)] bg-[#1a1b1f] border border-white/10 rounded-xl shadow-2xl shadow-black/60 z-[300] overflow-hidden ${upward ? 'bottom-12' : 'top-11'}`}>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+            <span className="text-sm font-bold text-white flex items-center gap-2">
+              <Bell className="w-3.5 h-3.5 text-brand-400" /> Notifications
+            </span>
+            {unreadCount > 0 && (
+              <button onClick={markAllRead} className="text-xs text-brand-400 hover:text-brand-300 transition">Mark all read</button>
+            )}
+          </div>
+          <div className="max-h-80 overflow-y-auto">
+            {notifications.length === 0 ? (
+              <div className="py-10 text-center">
+                <Bell className="w-8 h-8 text-gray-700 mx-auto mb-2" />
+                <p className="text-gray-500 text-sm">No new episodes</p>
+                <p className="text-gray-600 text-xs mt-1">Add airing anime to your watchlist</p>
+              </div>
+            ) : notifications.map(n => {
+              const isRead = readIds.has(n.id);
+              return (
+                <button key={n.id} onClick={() => { markRead(n.id); setOpen(false); navigate(`/anime/${n.animeId}`); }}
+                  className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition border-b border-white/5 last:border-0 text-left ${isRead ? 'opacity-40' : ''}`}>
+                  <img src={n.image} alt="" className="w-10 h-14 object-cover rounded flex-shrink-0 bg-gray-800" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      {!isRead && <span className="w-2 h-2 rounded-full bg-brand-500 flex-shrink-0" />}
+                      <span className="text-[10px] text-brand-400 font-bold uppercase tracking-wide">New Episode</span>
+                    </div>
+                    <p className="text-sm font-semibold text-white line-clamp-1">{n.title}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {n.watchedEp > 0 ? `Ep ${n.watchedEp + 1}–${n.availableEp} available` : `${n.availableEp} ep${n.availableEp > 1 ? 's' : ''} available`}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // --- Main App Component ---
 
