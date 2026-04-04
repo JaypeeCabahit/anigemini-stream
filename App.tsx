@@ -4188,7 +4188,7 @@ const AppContent = () => {
           <Route path="/manga/:id/read/:chapterId" element={<MangaReaderPage />} />
           <Route path="/about" element={<AboutPage />} />
         </Routes>
-        <BottomNav />
+        {!isLanding && <BottomNav />}
       </div>
     </>
   );
