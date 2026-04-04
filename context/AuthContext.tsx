@@ -208,50 +208,75 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   // ─── Online presence tracking ────────────────────────────────────────────────
-  // Writes to users/${uid}/online (user's own node) to avoid /presence permission_denied.
+  // Members: write to users/${uid}/online. Guests: write to presence/${sessionId}.
   useEffect(() => {
+    // Generate or reuse a guest session ID for this browser tab
+    let guestSessionId = sessionStorage.getItem('aniweb_guest_id');
+    if (!guestSessionId) {
+      guestSessionId = `g_${Math.random().toString(36).slice(2)}_${Date.now()}`;
+      sessionStorage.setItem('aniweb_guest_id', guestSessionId);
+    }
+
     let unsubConnected: (() => void) | null = null;
     let heartbeatInterval: any = null;
 
+    const memberRef = user ? ref(db, `users/${user.uid}/online`) : null;
+    const guestRef = !user ? ref(db, `presence/${guestSessionId}`) : null;
+
     const markOnline = () => {
-      if (!user) return;
-      set(ref(db, `users/${user.uid}/online`), { at: Date.now() }).catch(() => {});
+      if (user && memberRef) {
+        set(memberRef, { at: Date.now() }).catch(() => {});
+      } else if (!user && guestRef) {
+        set(guestRef, { at: Date.now(), guest: true }).catch(() => {});
+      }
     };
 
-    if (user) {
-      const connectedRef = ref(db, '.info/connected');
-      unsubConnected = onValue(connectedRef, snap => {
-        if (snap.val() === true) {
-          markOnline();
-          onDisconnect(ref(db, `users/${user.uid}/online`)).remove().catch(() => {});
-        }
-      });
-      // Heartbeat every 2 min so presence stays fresh
-      heartbeatInterval = setInterval(markOnline, 2 * 60 * 1000);
-    }
+    const connectedRef = ref(db, '.info/connected');
+    unsubConnected = onValue(connectedRef, snap => {
+      if (snap.val() === true) {
+        markOnline();
+        if (user && memberRef) onDisconnect(memberRef).remove().catch(() => {});
+        if (!user && guestRef) onDisconnect(guestRef).remove().catch(() => {});
+      }
+    });
 
-    // Read all users to compute online set (active within last 5 min)
+    // Heartbeat every 2 min so presence stays fresh
+    heartbeatInterval = setInterval(markOnline, 2 * 60 * 1000);
+
+    // Read members (users with recent online activity)
     const usersListRef = ref(db, 'users');
     const unsubUsers = onValue(usersListRef, snap => {
-      if (!snap.exists()) { setOnlineUsers({ members: 0, guests: 0 }); setOnlineUserIds([]); return; }
       const cutoff = Date.now() - 5 * 60 * 1000;
-      let members = 0;
       const ids: string[] = [];
-      Object.entries(snap.val() as Record<string, any>).forEach(([uid, data]: [string, any]) => {
-        if (data?.online?.at && data.online.at > cutoff) {
-          members++;
-          ids.push(uid);
-        }
-      });
-      setOnlineUsers({ members, guests: 0 });
+      if (snap.exists()) {
+        Object.entries(snap.val() as Record<string, any>).forEach(([uid, data]: [string, any]) => {
+          if (data?.online?.at && data.online.at > cutoff) ids.push(uid);
+        });
+      }
       setOnlineUserIds(ids);
+      setOnlineUsers(prev => ({ ...prev, members: ids.length }));
+    });
+
+    // Read guest presence separately
+    const presenceRef = ref(db, 'presence');
+    const unsubGuests = onValue(presenceRef, snap => {
+      const cutoff = Date.now() - 5 * 60 * 1000;
+      let guests = 0;
+      if (snap.exists()) {
+        Object.values(snap.val() as Record<string, any>).forEach((data: any) => {
+          if (data?.at && data.at > cutoff) guests++;
+        });
+      }
+      setOnlineUsers(prev => ({ ...prev, guests }));
     });
 
     return () => {
       if (unsubConnected) unsubConnected();
       if (heartbeatInterval) clearInterval(heartbeatInterval);
       unsubUsers();
-      if (user) remove(ref(db, `users/${user.uid}/online`)).catch(() => {});
+      unsubGuests();
+      if (user && memberRef) remove(memberRef).catch(() => {});
+      if (!user && guestRef) remove(guestRef).catch(() => {});
     };
   }, [user]);
 

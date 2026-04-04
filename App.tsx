@@ -1775,7 +1775,7 @@ const WatchPage = () => {
   const handleEpisodeSelect = async (episode: streamingService.Episode, animeOverride?: Anime) => {
     setCurrentEpisode(episode);
     setIntroSkipTo(0);
-    const index = episodes.findIndex(ep => ep.id === episode.id);
+    const index = filteredEpisodes.findIndex(ep => ep.id === episode.id);
     if (index >= 0) {
       const targetPage = Math.floor(index / EPISODE_PAGE_SIZE);
       if (targetPage !== episodePage) setEpisodePage(targetPage);
