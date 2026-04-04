@@ -667,7 +667,7 @@ const AnimeCard = ({ anime, rank }: { anime: Anime; rank?: number }) => {
           )}
           <div className="absolute top-2 right-2 z-10 flex flex-col gap-1 items-end">
             <Badge color="bg-brand-500 text-white">HD</Badge>
-            {anime.episodes && <Badge color="bg-brand-600 text-white">EP {anime.episodes}</Badge>}
+            {!!anime.episodes && <Badge color="bg-brand-600 text-white">EP {anime.episodes}</Badge>}
           </div>
           <LazyImage
             src={anime.images.webp.large_image_url}
