@@ -7,7 +7,7 @@ interface CacheItem<T> {
 
 class CacheService {
   // Bump the prefix when the API base or cached payload shape changes to force fresh data
-  private prefix = 'aniweb_cache_v2_';
+  private prefix = 'aniweb_cache_v3_';
 
   // Default cache durations (in milliseconds)
   private durations = {
