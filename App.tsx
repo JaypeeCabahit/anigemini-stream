@@ -3881,15 +3881,31 @@ const PublicUserProfilePage = () => {
 const LandingPage = () => {
   const navigate = useNavigate();
   const [featured, setFeatured] = useState<Anime[]>([]);
+  const [heroAnime, setHeroAnime] = useState<Anime | null>(null);
 
   useEffect(() => {
-    jikanService.getTopAnime().then(r => setFeatured(r.data.slice(0, 6)));
+    jikanService.getTopAnime().then(r => {
+      const list = r.data.slice(0, 6);
+      setFeatured(list);
+      if (list.length > 0) {
+        setHeroAnime(list[Math.floor(Math.random() * list.length)]);
+      }
+    });
   }, []);
+
+  const heroBg = heroAnime?.trailer?.images?.large_image_url || heroAnime?.images?.jpg?.large_image_url || null;
 
   return (
     <div className="min-h-screen bg-[#0e0f12] flex flex-col">
       {/* Hero */}
       <div className="relative flex-1 flex flex-col items-center justify-center text-center px-4 py-24 overflow-hidden">
+        {/* Random anime background */}
+        {heroBg && (
+          <>
+            <img src={heroBg} alt="" aria-hidden className="absolute inset-0 w-full h-full object-cover opacity-20 pointer-events-none select-none" style={{ filter: 'blur(2px)', transform: 'scale(1.05)' }} />
+            <div className="absolute inset-0 bg-gradient-to-b from-[#0e0f12]/60 via-[#0e0f12]/40 to-[#0e0f12] pointer-events-none" />
+          </>
+        )}
         {/* BG blobs — hidden on mobile to avoid GPU lag */}
         <div className="hidden sm:block absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-brand-500/10 rounded-full blur-[100px] pointer-events-none" />
         <div className="hidden sm:block absolute bottom-1/4 right-1/4 w-[350px] h-[350px] bg-purple-500/10 rounded-full blur-[80px] pointer-events-none" />
