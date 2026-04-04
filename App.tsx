@@ -3881,31 +3881,53 @@ const PublicUserProfilePage = () => {
 const LandingPage = () => {
   const navigate = useNavigate();
   const [featured, setFeatured] = useState<Anime[]>([]);
-  const [heroAnime, setHeroAnime] = useState<Anime | null>(null);
+  const [heroIndex, setHeroIndex] = useState(0);
 
   useEffect(() => {
     jikanService.getTopAnime().then(r => {
-      const list = r.data.slice(0, 6);
+      const list = r.data.slice(0, 8);
       setFeatured(list);
-      if (list.length > 0) {
-        setHeroAnime(list[Math.floor(Math.random() * list.length)]);
-      }
+      setHeroIndex(Math.floor(Math.random() * list.length));
     });
   }, []);
 
-  const heroBg = heroAnime?.trailer?.images?.large_image_url || heroAnime?.images?.jpg?.large_image_url || null;
+  // Advance slide every 5 seconds
+  useEffect(() => {
+    if (featured.length < 2) return;
+    const timer = setInterval(() => {
+      setHeroIndex(i => (i + 1) % featured.length);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [featured.length]);
+
+  const getBg = (anime: Anime) =>
+    anime?.trailer?.images?.large_image_url || anime?.images?.jpg?.large_image_url || '';
 
   return (
     <div className="min-h-screen bg-[#0e0f12] flex flex-col">
       {/* Hero */}
       <div className="relative flex-1 flex flex-col items-center justify-center text-center px-4 py-24 overflow-hidden">
-        {/* Random anime background */}
-        {heroBg && (
-          <>
-            <img src={heroBg} alt="" aria-hidden className="absolute inset-0 w-full h-full object-cover opacity-20 pointer-events-none select-none" style={{ filter: 'blur(2px)', transform: 'scale(1.05)' }} />
-            <div className="absolute inset-0 bg-gradient-to-b from-[#0e0f12]/60 via-[#0e0f12]/40 to-[#0e0f12] pointer-events-none" />
-          </>
-        )}
+        {/* Crossfade slideshow — all images stacked, CSS opacity transition handles fade */}
+        {featured.map((anime, i) => {
+          const bg = getBg(anime);
+          if (!bg) return null;
+          return (
+            <img
+              key={i}
+              src={bg}
+              alt=""
+              aria-hidden
+              className="absolute inset-0 w-full h-full object-cover pointer-events-none select-none"
+              style={{
+                filter: 'blur(3px)',
+                transform: 'scale(1.06)',
+                opacity: i === heroIndex ? 0.25 : 0,
+                transition: 'opacity 1.5s ease-in-out',
+              }}
+            />
+          );
+        })}
+        <div className="absolute inset-0 bg-gradient-to-b from-[#0e0f12]/60 via-[#0e0f12]/40 to-[#0e0f12] pointer-events-none" />
         {/* BG blobs — hidden on mobile to avoid GPU lag */}
         <div className="hidden sm:block absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-brand-500/10 rounded-full blur-[100px] pointer-events-none" />
         <div className="hidden sm:block absolute bottom-1/4 right-1/4 w-[350px] h-[350px] bg-purple-500/10 rounded-full blur-[80px] pointer-events-none" />
