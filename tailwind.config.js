@@ -23,7 +23,6 @@ export default {
     },
   },
   safelist: [
-    'bg-white/90', 'text-black',
     'bg-brand-600', 'bg-brand-500', 'bg-brand-900/50',
     'text-brand-300', 'border-brand-500/20',
   ],

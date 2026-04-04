@@ -657,7 +657,7 @@ const AnimeCard = ({ anime, rank }: { anime: Anime; rank?: number }) => {
             </div>
           )}
           <div className="absolute top-2 right-2 z-10 flex flex-col gap-1 items-end">
-            <Badge color="bg-white/90 text-black">HD</Badge>
+            <Badge color="bg-brand-500 text-white">HD</Badge>
             {anime.episodes && <Badge color="bg-brand-600 text-white">EP {anime.episodes}</Badge>}
           </div>
           <LazyImage
@@ -710,7 +710,7 @@ const AnimeCard = ({ anime, rank }: { anime: Anime; rank?: number }) => {
           )}
           <div className="mt-3 flex items-center gap-2">
             <span className="text-[10px] bg-brand-500/20 text-brand-400 border border-brand-500/30 px-2 py-0.5 rounded-full font-bold">{anime.type || 'TV'}</span>
-            <span className="text-[10px] bg-white/5 text-gray-400 px-2 py-0.5 rounded-full">HD</span>
+            <span className="text-[10px] bg-brand-500 text-white px-2 py-0.5 rounded-full font-bold">HD</span>
           </div>
         </div>
       )}
@@ -1536,7 +1536,7 @@ const AnimeDetailsPage = () => {
             )}
 
             <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 mb-8">
-              <span className="bg-white text-black text-xs font-black px-2 py-1 rounded">HD</span>
+              <span className="bg-brand-500 text-white text-xs font-black px-2 py-1 rounded">HD</span>
               <span className="bg-yellow-500 text-black text-xs font-black px-2 py-1 rounded flex items-center gap-1">
                 <Star className="w-3 h-3 fill-current" /> {anime.score}
               </span>
