@@ -5,11 +5,10 @@ import { BrowserRouter, Routes, Route, Link, useNavigate, useParams, useLocation
 import { Search, Home, PlayCircle, Play, Pause, User, LogOut, Menu, X, Heart, Star, Plus, Info, Sparkles, LogIn, Lock, AlertCircle, ChevronRight, ChevronLeft, Calendar, Clock, Monitor, Mic, SkipForward, SkipBack, Lightbulb, Tv, Settings, MessageCircle, ChevronsRight, ChevronsLeft, Shuffle, Users, Edit3, Check, Globe, BookOpen, Eye, EyeOff, Bell } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import * as jikanService from './services/jikanService';
-import * as geminiService from './services/geminiService';
 import * as streamingService from './services/streamingService';
 import * as mangaService from './services/mangaService';
 import * as aniskipService from './services/aniskipService';
-import { Anime, GeminiRecommendation, Manga, MangaChapter } from './types';
+import { Anime, Manga, MangaChapter } from './types';
 import { AnimeCardSkeleton, HeroSkeleton, DetailsSkeleton, EpisodeListSkeleton } from './components/LoadingSkeleton';
 import { LazyImage } from './components/LazyImage';
 import { ErrorBoundary } from './components/ErrorBoundary';

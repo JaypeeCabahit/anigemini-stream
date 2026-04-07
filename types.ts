@@ -40,11 +40,6 @@ export interface Anime {
   rank?: number;
 }
 
-export interface GeminiRecommendation {
-  title: string;
-  reason: string;
-}
-
 // Manga support
 export interface Manga {
   id?: number | string;

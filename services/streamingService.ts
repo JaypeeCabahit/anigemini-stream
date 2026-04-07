@@ -3,14 +3,6 @@ import { cachedFetch } from './cacheService';
 // Yorumi backend - run locally: cd "../Yorumi-main/Yorumi-main/backend" && npm run dev
 const API_BASE_URL = import.meta.env.VITE_API_BASE ?? 'http://localhost:3001/api';
 
-export interface StreamResult {
-  id: string;       // AnimePahe anime session (e.g. "attack-on-titan-abc123")
-  title: string;
-  image: string;
-  releaseDate: string;
-  subOrDub: string;
-}
-
 export interface Episode {
   id: string;       // compound: "{animeSession}||{epSession}"
   number: number;
@@ -23,27 +15,6 @@ export interface StreamSource {
   download: string;
   isEmbed: boolean; // true = Kwik iframe embed, false = direct HLS
 }
-
-export const searchStreamAnime = async (query: string): Promise<StreamResult[]> => {
-  try {
-    const response = await fetch(
-      `${API_BASE_URL}/scraper/search?q=${encodeURIComponent(query.trim())}`
-    );
-    if (!response.ok) return [];
-    const data = await response.json();
-    const results = Array.isArray(data) ? data : [];
-    return results.map((item: any) => ({
-      id: item.session,
-      title: item.title,
-      image: item.poster || '',
-      releaseDate: item.year ? String(item.year) : '',
-      subOrDub: 'sub',
-    }));
-  } catch (error) {
-    console.error('Yorumi Search Error', error);
-    return [];
-  }
-};
 
 export const getStreamEpisodes = async (animeSession: string): Promise<Episode[]> => {
   try {

@@ -445,19 +445,6 @@ export const getAnimeRecommendations = async (id: string): Promise<Anime[]> => {
   }
 };
 
-// Titles: English + Japanese (romaji) stored on each anime
-export interface TitleData {
-  english: string | null;
-  romaji: string | null;
-  native: string | null;
-}
-
-export const getAnimeTitles = (anime: Anime): TitleData => ({
-  english: (anime as any)._titles?.english ?? null,
-  romaji: (anime as any)._titles?.romaji ?? anime.title,
-  native: (anime as any)._titles?.native ?? null,
-});
-
 // Random anime — picks a random popular page and returns one anime ID
 let _randomPool: string[] = [];
 export const getRandomAnime = async (): Promise<string | null> => {
